@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CAUSTIC//LITE</title>
+<meta name="description" content="Real-time water caustics with three.js in one small HTML file: a random sea, a rubber duck making ripples, turbulence, sun or lamp. Falls back to the CPU without WebGL.">
+<style>
+:root{--bg:#0e1012;--ink:#d9e4e8;--dim:#7f8e95;--cyan:#5fe3ff;--gold:#e5b95a;--cream:#efe6d2;--line:rgba(95,227,255,.16)}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--ink);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab} canvas:active{cursor:grabbing}
+details{position:fixed;left:12px;top:12px;width:236px;padding:12px 16px 14px;background:rgba(14,16,18,.86);border:1px solid var(--line);backdrop-filter:blur(6px)}
+details::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(to bottom,rgba(255,255,255,.028) 0 1px,transparent 1px 3px)}
+summary{cursor:pointer;list-style:none;font:21px/1.1 Georgia,serif;letter-spacing:.06em;color:var(--cream)}
+summary::-webkit-details-marker{display:none} summary b{color:var(--cyan);font-weight:400}
+label{display:flex;justify-content:space-between;margin-top:10px;color:var(--dim)} label span{color:var(--ink)}
+input{width:100%;margin:5px 0 0;accent-color:var(--cyan)}
+input:focus-visible,button:focus-visible{outline:1px solid var(--gold);outline-offset:2px}
+.seg{display:flex;margin-top:12px;border:1px solid var(--line)}
+.seg button{flex:1;padding:5px 0;border:0;background:transparent;color:var(--dim);font:inherit;cursor:pointer;position:relative;z-index:1}
+.seg button[aria-pressed=true]{background:rgba(95,227,255,.14);color:var(--cyan)}
+.chk{justify-content:flex-start;gap:8px;color:var(--ink);cursor:pointer} .chk input{width:auto;margin:0}
+#stats{margin-top:12px;color:var(--gold);font-variant-numeric:tabular-nums}
+p{margin:6px 0 0;color:var(--dim);font-size:11px}
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }</script>
+</head>
+<body>
+<canvas id="view" role="img" aria-label="A glass tank of water on a tiled floor; light through the moving surface draws caustics on the tank floor"></canvas>
+<details id="ui" open>
+  <summary>CAUSTIC<b>//</b>LITE</summary>
+  <div class="seg" role="group" aria-label="Light source"><button id="sun" aria-pressed="true">Sun</button><button id="lamp" aria-pressed="false">Lamp</button></div>
+  <div id="sunCtl"><label for="elev">Sun height <span id="elevOut"></span></label><input id="elev" type="range" min="5" max="85" value="50">
+    <label for="az">Sun direction <span id="azOut"></span></label><input id="az" type="range" min="0" max="360" value="225"></div>
+  <div id="lampCtl" hidden><label for="lampH">Lamp height <span id="lampHOut"></span></label><input id="lampH" type="range" min="1.8" max="3.4" step="0.05" value="2.3">
+    <label for="lampX">Lamp position <span id="lampXOut"></span></label><input id="lampX" type="range" min="-1.5" max="1.5" step="0.05" value="0.5"></div>
+  <label for="waves">Waves <span id="wavesOut"></span></label><input id="waves" type="range" min="0" max="2" step="0.01" value="1">
+  <label for="turb">Turbulence <span id="turbOut"></span></label><input id="turb" type="range" min="0" max="1" step="0.01" value="0.5">
+  <label class="chk"><input id="duck" type="checkbox" checked> Rubber duck</label>
+  <div id="stats"></div>
+  <p>Drag to orbit · scroll or pinch to zoom · click the water for ripples (or near the duck to push it) · <kbd>R</kbd> random ripple · <kbd>D</kbd> duck · <kbd>L</kbd> sun or lamp · <kbd>Space</kbd> pause · <kbd>H</kbd> hide</p>
+</details>
+<script type="module">
+// =====================================================================================
+// CAUSTIC//LITE — light through moving water, focused into caustics on a tank floor. Built on
+// three.js: a random sea and a rubber duck's ripples (a GPU ripple simulation) move the surface,
+// a caustics texture is redrawn every frame, and small shaders follow each ray through the water.
+// Without WebGL 2 (or offline, when three.js can't load) a small CPU renderer draws the same scene.
+// =====================================================================================
+
+// ---------------------------------------------------------------- the scene (metres)
+const TX = 1.8, TZ = 1.1, TOP = 1.55;   // tank half-width (x), half-depth (z), rim height
+const LEVEL = 1.2, IOR = 1.333;         // water level, refractive index of water
+const ABSORB = [0.6, 0.1, 0.055];       // absorption per metre: red goes first, so water looks blue-green
+const TARGET = [0, 0.55, 0], FOV = 42;
+
+// ---------------------------------------------------------------- the water's own motion (both renderers)
+// A random sea: 24 waves from 1.2 m down to 12 cm long, heading every which way (a golden-angle
+// spread, so waves of neighbouring lengths never run side by side). Together they make a short-
+// crested, random surface, and its caustics form a net of bright cells instead of stripes. Each wave's
+// crests wander, and its height rises and falls on its own slow cycle, so the net keeps reshaping.
+// Waves scales them all; Turbulence adds the short ones and livens the cycles. On top of that, a
+// ripple simulation carries the rubber duck's wake, clicks and gusts across the tank and back off the glass.
+const NW = 24, WAVES = [];
+{
+  let s = 5;
+  const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < NW; i++) {
+    const len = 1.2 * 0.1 ** (i / (NW - 1)), k = 2 * Math.PI / len, dir = i * 2.39996 + (rnd() - 0.5) * 0.9;
+    WAVES.push({ k, kx: k * Math.cos(dir), kz: k * Math.sin(dir), w: Math.sqrt(9.81 * k + 0.074 * k ** 3), ph: rnd() * 6.283,
+      a: 0.55 * Math.min(1, (0.55 / len) ** 2) / (k * k) * (0.6 + 0.8 * rnd()), short: len < 0.3,   // the same curvature (a k^2) for most
+      f1: 0.05 + 0.22 * rnd(), f2: 0.09 + 0.3 * rnd(), p1: rnd() * 6.283, p2: rnd() * 6.283 });
+  }
+}
+const waveUniform = new Float32Array(NW * 4), ampUniform = new Float32Array(NW);
+WAVES.forEach((W, i) => waveUniform.set([W.kx, W.kz, W.w, W.ph], i * 4));
+function waveHeights(t, waves, turb) {   // each wave's height now (m)
+  const swing = 0.35 + 0.55 * turb;
+  WAVES.forEach((W, i) => { ampUniform[i] = W.a * Math.max(0.1, 1 + swing * (0.6 * Math.sin(W.f1 * t + W.p1) + 0.4 * Math.sin(W.f2 * t + W.p2)))
+    * waves * (W.short ? 0.3 + 1.4 * turb : 1); });
+}
+// the sea at (x, z), as the GPU computes it -> o: height, slope x, slope z, and the water's horizontal velocity
+function waveAt(x, z, o) {
+  let h = 0, gx = 0, gz = 0, u = 0, v = 0;
+  for (let i = 0; i < NW; i++) {   // each wave's crests are bent by a slower wave running along them
+    const W = WAVES[i], k = W.k, kb = 0.37 * k, sx = -W.kz / k, sz = W.kx / k;
+    const pb = kb * (sx * x + sz * z) + 0.9 * state.t + 7.1 * i, ph = W.kx * x + W.kz * z - W.w * state.t + W.ph + 1.6 * Math.sin(pb);
+    const a = ampUniform[i], s = a * Math.sin(ph), cp = a * Math.cos(ph), b = 1.6 * kb * Math.cos(pb);
+    h += s; gx += cp * (W.kx + b * sx); gz += cp * (W.kz + b * sz); u += s * W.w * W.kx / k; v += s * W.w * W.kz / k;
+  }
+  o[0] = h; o[1] = gx; o[2] = gz; o[3] = u; o[4] = v;
+}
+
+const $ = (id) => document.getElementById(id);
+const state = { t: 0, paused: false, lamp: false, scale: 1, waves: 1, turb: 0.5 };
+const drops = [];   // splashes waiting for the ripple simulation: x, z, radius (m), height (mm)
+let splashAcc = 0;
+function addRipple(x, z, h = 6, r = 0.06) { drops.push([x, z, r, h]); }
+function turbulence(dt) {   // gusts ruffle the water here and there, more of them with more turbulence
+  for (splashAcc += dt * 5 * state.turb; splashAcc >= 1; splashAcc -= 1)
+    addRipple((Math.random() * 2 - 1) * TX * 0.95, (Math.random() * 2 - 1) * TZ * 0.95, (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random()) * state.turb, 0.03 + 0.05 * Math.random());
+}
+
+// ---------------------------------------------------------------- the rubber duck
+// The sandbox's duck. In duck units (body length 1; x forward, y up, the flat base at the origin),
+// ellipsoids and a sphere make the body, tail, chest, head and wings, blended by a smooth minimum so
+// they flow into each other; a flattened beak has a mouth line cut in; then two eyes. These are distance
+// functions (negative inside): the GPU renderer turns them into a mesh once, the CPU one traces them.
+// The duck drifts on a wandering breeze, sways with the waves, bobs and slowly turns; its hull pushes
+// the water aside, and the ripple simulation spreads that into a wake and rings (see hull()).
+const DS = 0.28, DRAFT = 0.125 * DS, FOOT = [0.43 * DS, 0.32 * DS];   // metres per duck unit; how deep it floats; its waterline (half-axes, m)
+const ell = (x, y, z, a, b, c) => { x /= a; y /= b; z /= c; const k0 = Math.sqrt(x * x + y * y + z * z), k1 = Math.sqrt(x * x / (a * a) + y * y / (b * b) + z * z / (c * c)); return k0 * (k0 - 1) / k1; };
+const smin = (a, b, k) => { const h = Math.min(Math.max(0.5 + 0.5 * (b - a) / k, 0), 1); return b + (a - b) * h - k * h * (1 - h); };
+const box = (x, y, z, a, b, c, r) => { const qx = Math.abs(x) - a + r, qy = Math.abs(y) - b + r, qz = Math.abs(z) - c + r, ux = Math.max(qx, 0), uy = Math.max(qy, 0), uz = Math.max(qz, 0);
+  return Math.sqrt(ux * ux + uy * uy + uz * uz) + Math.min(Math.max(qx, qy, qz), 0) - r; };
+const TIP = [Math.cos(0.55), Math.sin(0.55), Math.cos(0.25), Math.sin(0.25), Math.cos(0.1), -Math.sin(0.1)];   // how the tail, wings and beak are tipped
+function duckBody(x, y, z) {   // as duckShape() in the shaders
+  const tx = x + 0.4, ty = y - 0.46, wx = x + 0.04, wy = y - 0.37, hx = x - 0.25, hy = y - 0.8;
+  let d = ell(x, y - 0.28, z, 0.5, 0.3, 0.37);                                                         // body
+  d = smin(d, ell(tx * TIP[0] + ty * TIP[1], ty * TIP[0] - tx * TIP[1], z, 0.2, 0.13, 0.15), 0.12);    // tail
+  d = smin(d, ell(x - 0.22, y - 0.3, z, 0.3, 0.26, 0.31), 0.1);                                        // chest
+  d = smin(d, Math.sqrt(hx * hx + hy * hy + z * z) - 0.25, 0.14);                                      // head
+  d = smin(d, ell(wx * TIP[2] + wy * TIP[3], wy * TIP[2] - wx * TIP[3], Math.abs(z) - 0.29, 0.27, 0.12, 0.08), 0.05);   // wings
+  return Math.max(d, box(x, y - 0.6, z, 1.2, 0.58, 1.2, 0.03));                                        // flat base
+}
+function duckBeak(x, y, z) {
+  const bx = x - 0.53, by = y - 0.73;
+  return Math.max(ell(bx * TIP[4] + by * TIP[5], by * TIP[4] - bx * TIP[5], z, 0.18, 0.065, 0.14), -box(x - 0.64, y - 0.725, z, 0.12, 0.007, 0.2, 0));
+}
+const EYE = [0.41, 0.9, 0.15, 0.055];   // eye centre (and its mirror image across z), radius
+const pupil = (x, y, z) => Math.hypot(x - 0.44, y - 0.906, Math.abs(z) - 0.172) < 0.032;   // a black disc, looking forward and out
+const DUCK = { on: true, x: 0.55, z: 0.25, vx: 0, vz: 0, head: 2.5, spin: 0, y: 0, vy: 0, pitch: 0, roll: 0, breeze: 0.9, draft: DRAFT };
+const PUSH = 420;   // how much of the water the hull moves shows up as ripples (mm per m)
+const dw = new Float32Array(5);
+function duckStep(h, turb) {   // move the duck on by h seconds -> its hull before and after: x, z, heading, depth
+  const D = DUCK, before = [D.x, D.z, D.head, D.on ? D.draft : 0];
+  waveAt(D.x, D.z, dw);
+  D.breeze += (Math.random() - 0.5) * Math.sqrt(h) * (0.6 + 2 * turb);
+  const sp = 0.03 + 0.12 * turb, wall = (d) => Math.max(0, 0.5 - d) * 0.8;   // the glass pushes it back
+  D.vx += (Math.cos(D.breeze) * sp + 0.9 * dw[3] + wall(TX + D.x) - wall(TX - D.x) - D.vx) * Math.min(1, 1.5 * h);
+  D.vz += (Math.sin(D.breeze) * sp + 0.9 * dw[4] + wall(TZ + D.z) - wall(TZ - D.z) - D.vz) * Math.min(1, 1.5 * h);
+  D.x = Math.min(Math.max(D.x + D.vx * h, 0.24 - TX), TX - 0.24); D.z = Math.min(Math.max(D.z + D.vz * h, 0.24 - TZ), TZ - 0.24);
+  // it turns to face the way it drifts, with a slow random spin
+  const want = Math.atan2(D.vz, D.vx);
+  D.spin = D.spin * Math.exp(-h) + (Math.random() - 0.5) * Math.sqrt(h) * (0.4 + 1.5 * turb);
+  D.head += (Math.atan2(Math.sin(want - D.head), Math.cos(want - D.head)) * Math.min(1, 6 * Math.hypot(D.vx, D.vz)) * 0.7 + D.spin) * h;
+  // it bobs on a spring toward the water's height, knocked about more when it's turbulent, and leans with the slope
+  D.vy += (-45 * (D.y - dw[0]) - 3.5 * D.vy) * h + (Math.random() - 0.5) * Math.sqrt(h) * 0.25 * turb;
+  D.y += D.vy * h;
+  D.draft = Math.max(0, DRAFT + dw[0] - D.y);
+  const c = Math.cos(D.head), s = Math.sin(D.head), k = Math.min(1, 5 * h);
+  D.pitch += (Math.atan(dw[1] * c + dw[2] * s) - D.pitch) * k;
+  D.roll += (-Math.atan(dw[2] * c - dw[1] * s) - D.roll) * k;
+  return [before, [D.x, D.z, D.head, D.on ? D.draft : 0]];
+}
+// how far below the water the hull reaches at (x, z) (m), for a hull state d: x, z, heading, depth
+function hull(x, z, d) {
+  const qx = x - d[0], qz = z - d[1], c = Math.cos(d[2]), s = Math.sin(d[2]);
+  const u = (qx * c + qz * s) / FOOT[0], w = (qz * c - qx * s) / FOOT[1], r = Math.max(0, 1 - u * u - w * w); return d[3] * r * r;
+}
+function poke(x, z) {   // a click on the water: a ripple, and a shove for the duck if it's close
+  addRipple(x, z);
+  const dx = DUCK.x - x, dz = DUCK.z - z, d = Math.hypot(dx, dz);
+  if (DUCK.on && d < 0.6) { const k = 0.35 * (1 - d / 0.6) / Math.max(d, 0.05); DUCK.vx += dx * k; DUCK.vz += dz * k; DUCK.vy -= 0.15; }
+}
+
+// light: the sun (a direction) or the lamp (a point above the tank), and what it does to the sky
+function light() {
+  if (state.lamp) return { lamp: true, pos: [+$('lampX').value, +$('lampH').value, 0.1], col: [6, 6 * 0.8, 6 * 0.58], amb: [0.012, 0.016, 0.028],
+    glow: [0.004, 0.012, 0.014], day: 0.05 };
+  const el = +$('elev').value * Math.PI / 180, az = +$('az').value * Math.PI / 180;
+  const warm = Math.min(1, el / 0.5), day = 0.35 + 0.65 * Math.min(1, el / 0.6), I = 3.2, glow = 0.35 * I * Math.sin(el) + 0.4 * day;
+  return { lamp: false, pos: [Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)], col: [I, I * (0.62 + 0.36 * warm), I * (0.38 + 0.56 * warm)],
+    amb: [0.3 * day, 0.42 * day, 0.62 * day], glow: [0.012 * glow, 0.07 * glow, 0.085 * glow], day };
+}
+
+// ================================================================= GPU: three.js
+const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));   // number -> GLSL float
+const SIM = [256, 156];                                              // ripple grid: 1.4 cm cells
+const CAUS = [512, 312];                                             // caustics texture: 7 mm texels
+const COMMON = /* glsl */`
+uniform float uLamp, uDay, uDuckOn;
+uniform vec4 uDuck;                // the rubber duck: body centre, heading
+uniform vec3 uLight, uLightCol, uAmb, uGlow;   // sun direction or lamp position; its colour; ambient; water glow
+uniform sampler2D uSurf, uCaus;    // the water's height (m) and slope over the tank; light reaching the tank floor
+const float PI = 3.14159265, LEVEL = ${f(LEVEL)}, IOR = ${f(IOR)}, DS = ${f(DS)};
+const vec3 TANK = vec3(${f(TX)}, ${f(TOP)}, ${f(TZ)}), ABSORB = vec3(${ABSORB.map(f)}), YELLOW = vec3(0.92, 0.6, 0.012);
+
+// water height above LEVEL and its slope at p: the sea and the ripples, drawn together once a frame (see surfMat)
+vec3 wave(vec2 p) { return textureLod(uSurf, p / (2.0 * TANK.xz) + 0.5, 0.0).xyz; }
+vec3 normalOf(vec3 w) { return normalize(vec3(-w.y, 1.0, -w.z)); }
+// the duck's body, as duckBody() (duck units): ellipsoids and a sphere blended by a smooth minimum, a flat base
+float ell(vec3 p, vec3 r) { float k0 = length(p / r), k1 = length(p / (r * r)); return k0 * (k0 - 1.0) / k1; }
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+vec3 tipped(vec3 p, vec2 c, float a) { vec2 q = p.xy - c; return vec3(cos(a) * q.x + sin(a) * q.y, cos(a) * q.y - sin(a) * q.x, p.z); }
+float duckShape(vec3 p) {
+  float d = ell(p - vec3(0.0, 0.28, 0.0), vec3(0.5, 0.3, 0.37));
+  d = smin(d, ell(tipped(p, vec2(-0.4, 0.46), 0.55), vec3(0.2, 0.13, 0.15)), 0.12);
+  d = smin(d, ell(p - vec3(0.22, 0.3, 0.0), vec3(0.3, 0.26, 0.31)), 0.1);
+  d = smin(d, length(p - vec3(0.25, 0.8, 0.0)) - 0.25, 0.14);
+  d = smin(d, ell(tipped(vec3(p.xy, abs(p.z) - 0.29), vec2(-0.04, 0.37), 0.25), vec3(0.27, 0.12, 0.08)), 0.05);
+  vec3 q = abs(p - vec3(0.0, 0.6, 0.0)) - vec3(1.17, 0.55, 1.17);
+  return max(d, length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - 0.03);
+}
+// a point, or a direction, in the duck's frame: duck units, x forward (without its lean)
+vec3 duckP(vec3 p) { vec2 f = vec2(cos(uDuck.w), sin(uDuck.w)); vec3 q = (p - uDuck.xyz) / DS; return vec3(dot(q.xz, f), q.y, dot(q.xz, vec2(-f.y, f.x))); }
+vec3 duckV(vec3 v) { vec2 f = vec2(cos(uDuck.w), sin(uDuck.w)); return vec3(dot(v.xz, f), v.y, dot(v.xz, vec2(-f.y, f.x))); }
+// a ray against the duck's body, marched through its distance function: distance (0 from inside, 1e9 on a miss), normal
+float duck(vec3 ro, vec3 rd, out vec3 n) {
+  n = vec3(0.0, 1.0, 0.0);
+  vec3 o = duckP(ro), d = duckV(rd), c = o - vec3(-0.05, 0.53, 0.0);   // first, a ball round it
+  float b = dot(c, d), h = b * b - dot(c, c) + 0.81;
+  if (uDuckOn < 0.5 || h < 0.0) return 1e9;
+  for (float t = max(-b - sqrt(h), 0.0), i = 0.0; i < 40.0 && t <= -b + sqrt(h); i++) {
+    vec3 p = o + d * t; const vec2 k = vec2(0.003, -0.003);
+    float e = duckShape(p);
+    if (e < 0.002) {
+      vec3 m = k.xyy * duckShape(p + k.xyy) + k.yyx * duckShape(p + k.yyx) + k.yxy * duckShape(p + k.yxy) + k.xxx * duckShape(p + k.xxx);
+      vec2 f = vec2(cos(uDuck.w), sin(uDuck.w));
+      n = normalize(vec3(m.x * f.x - m.z * f.y, m.y, m.x * f.y + m.z * f.x));
+      return t * DS;
+    }
+    t += e;
+  }
+  return 1e9;
+}
+// how much of the light along a ray from p gets past the duck: 0 in its shadow, soft at the edges
+// (light seldom comes from a single point), from how close the ray passes to its body and head
+float duckClear(vec3 p, vec3 v) {
+  if (uDuckOn < 0.5) return 1.0;
+  vec3 o = duckP(p), e = duckV(v), R = vec3(0.5, 0.3, 0.37);
+  vec3 a = (o - vec3(0.0, 0.28, 0.0)) / R, b = e / R, c = (o - vec3(0.25, 0.8, 0.0)) / 0.25, g = e / 0.25;
+  return smoothstep(0.7, 1.35, length(a + b * max(-dot(a, b) / dot(b, b), 0.0)))
+       * smoothstep(0.7, 1.35, length(c + g * max(-dot(c, g) / dot(g, g), 0.0)));
+}
+float fresnel(float c) { return 0.02 + 0.98 * pow(1.0 - clamp(c, 0.0, 1.0), 5.0); }   // Schlick, water
+
+vec3 sky(vec3 d, float disk) {   // disk: how much of the sun's sharp disk to show (reflections use a softer glint)
+  if (uLamp > 0.5) return vec3(0.01, 0.014, 0.026) * (1.2 - 0.6 * clamp(d.y, 0.0, 1.0));   // night
+  float s = dot(d, uLight), g = max(s, 0.0);
+  vec3 c = mix(vec3(0.56, 0.67, 0.8), vec3(0.15, 0.32, 0.68), sqrt(clamp(d.y, 0.0, 1.0))) * uDay;
+  return c + uLightCol * (disk * smoothstep(0.99985, 0.99995, s) * 60.0 + (1.0 - disk) * pow(g, 900.0) * 7.0
+                          + pow(g, 24.0) * 0.12 + g * g * g * g * 0.05 * (1.0 - abs(d.y)));
+}
+// what a ray reflected or refracted at p sees: the sky, plus the lamp's bulb when it looks at it
+vec3 look(vec3 p, vec3 d) {
+  if (uLamp < 0.5) return sky(d, 0.0);
+  vec3 b = uLight - p;
+  return sky(d, 0.0) + uLightCol * 1.5 * smoothstep(0.998, 0.9997, dot(d, normalize(b))) / max(1.0, dot(b, b));
+}
+// entry and exit distances of a ray through the tank's box
+vec2 box(vec3 ro, vec3 rd) {
+  vec3 inv = 1.0 / (rd + vec3(1e-7)), t0 = (vec3(-TANK.x, 0.0, -TANK.z) - ro) * inv, t1 = (TANK - ro) * inv;
+  vec3 a = min(t0, t1), b = max(t0, t1);
+  return vec2(max(max(a.x, a.y), a.z), min(min(b.x, b.y), b.z));
+}
+// light arriving at a point in air: direction to the light and irradiance (the lamp shade makes a cone)
+vec3 lightAt(vec3 p, out vec3 L) {
+  if (uLamp < 0.5) { L = uLight; return uLightCol; }
+  vec3 d = uLight - p; float r2 = dot(d, d); L = d * inversesqrt(r2);
+  return uLightCol / r2 * smoothstep(0.35, 0.75, L.y);
+}
+vec3 ground(vec3 p, float px) {   // px: size of a pixel on the ground, for smooth tile lines
+  float e = 0.5 - max(abs(fract(p.x) - 0.5), abs(fract(p.z) - 0.5));
+  float line = (1.0 - smoothstep(0.01, 0.01 + px, e)) * min(1.0, 0.012 / px);
+  vec3 alb = vec3(0.2 + 0.03 * mod(floor(p.x) + floor(p.z), 2.0)) * (1.0 - 0.45 * line), L;
+  vec3 E = lightAt(p, L) * max(L.y, 0.0);
+  vec2 tb = box(p, L);
+  if (tb.y > max(tb.x, 0.0)) E *= 0.7 * exp(-ABSORB * 0.7 * (tb.y - max(tb.x, 0.0)));   // light through the tank
+  float dist = length(p - cameraPosition);
+  return mix(alb / PI * (E + uAmb), sky(normalize(vec3(p.x - cameraPosition.x, 0.0, p.z - cameraPosition.z)), 0.0), 1.0 - exp(-0.018 * dist));
+}
+vec3 background(vec3 p, vec3 d) {
+  if (d.y >= 0.0) return look(p, d);
+  vec3 q = p - d * (p.y / d.y);
+  return ground(q, length(q - cameraPosition) * 0.002);
+}
+// sunlight that comes in through a glass wall below the water line (it reaches a band of floor along
+// the sunlit walls that light through the surface can't), spread by the slant of its path
+vec3 wallLight(vec3 q) {
+  vec3 E = vec3(0.0);
+  if (uLamp > 0.5) return E;
+  for (int a = 0; a < 2; a++) {
+    vec3 n = a == 0 ? vec3(sign(uLight.x), 0.0, 0.0) : vec3(0.0, 0.0, sign(uLight.z));   // the sunlit wall, facing out
+    float ci = dot(uLight, n);
+    if (ci < 0.02) continue;
+    vec3 t = refract(-uLight, n, 1.0 / IOR);                                               // the light in the water
+    float u = (dot(q, n) - (a == 0 ? TANK.x : TANK.z)) / dot(t, n);                        // back along it to the wall
+    vec3 e = q - t * u;
+    if (e.y < LEVEL - 0.03 && abs(a == 0 ? e.z : e.x) < (a == 0 ? TANK.z : TANK.x))
+      E += 0.8 * (1.0 - fresnel(ci)) * -t.y * ci / abs(dot(t, n)) * exp(-ABSORB * u);
+  }
+  return E;
+}
+// the tank floor: tiles lit by the caustics texture, light through the walls, and the dim light that filters down
+vec3 floorColor(vec3 q) {
+  vec2 g = abs(fract(q.xz * 5.0) - 0.5);   // 20 cm tiles
+  float edge = min(TANK.x - abs(q.x), TANK.z - abs(q.z));
+  vec3 alb = mix(vec3(0.78, 0.83, 0.82), vec3(0.36, 0.43, 0.45), smoothstep(0.43, 0.47, max(g.x, g.y))) * (0.55 + 0.45 * smoothstep(0.0, 0.3, edge));
+  vec2 uv = q.xz / (2.0 * TANK.xz) + 0.5, o = 0.6 / vec2(${f(CAUS[0])}, ${f(CAUS[1])});   // four taps: a little smoother
+  vec3 caus = 0.25 * (texture(uCaus, uv + o).rgb + texture(uCaus, uv - o).rgb + texture(uCaus, uv + vec2(o.x, -o.y)).rgb + texture(uCaus, uv - vec2(o.x, -o.y)).rgb);
+  return alb / PI * (uLightCol * (caus + wallLight(q)) + uAmb * exp(-ABSORB * LEVEL * 1.5));
+}
+// distance along a ray going up inside the water to the wavy surface (or tmax): step until it has
+// crossed, then narrow it down between the last two steps
+float surface(vec3 ro, vec3 rd, float tmax) {
+  float t0 = 0.0, f0 = -1e-4, dt = min(tmax, (LEVEL + 0.3 - ro.y) / rd.y) / 10.0;
+  for (int i = 1; i <= 10; i++) {
+    float t1 = dt * float(i);
+    vec3 p = ro + rd * t1;
+    float f1 = p.y - LEVEL - wave(clamp(p.xz, -TANK.xz, TANK.xz)).x;
+    if (f1 > 0.0) {
+      for (int j = 0; j < 3; j++) {
+        float tm = t0 + (t1 - t0) * f0 / (f0 - f1);
+        vec3 q = ro + rd * tm;
+        float fm = q.y - LEVEL - wave(clamp(q.xz, -TANK.xz, TANK.xz)).x;
+        if (fm > 0.0) { t1 = tm; f1 = fm; } else { t0 = tm; f0 = fm; }
+      }
+      return t0 + (t1 - t0) * f0 / (f0 - f1);
+    }
+    t0 = t1; f0 = f1;
+  }
+  return 1e9;
+}
+// a ray inside the water: absorbed and lit by the water as it goes; it ends on the floor, or leaves
+// through a wall or the surface, reflecting part of itself back in (all of it past the critical angle)
+vec3 water(vec3 p, vec3 d) {
+  vec3 col = vec3(0.0), thr = vec3(1.0);
+  for (int i = 0; i < 3; i++) {
+    float tx = (sign(d.x) * TANK.x - p.x) / (d.x + 1e-7), tz = (sign(d.z) * TANK.z - p.z) / (d.z + 1e-7);
+    float tf = d.y < 0.0 ? -p.y / d.y : 1e9, ts = d.y > 0.0 ? surface(p, d, min(tx, tz)) : 1e9;
+    vec3 dn, L;
+    float td = duck(p, d, dn), t = min(min(min(tf, ts), min(tx, tz)), td);
+    vec3 T = exp(-ABSORB * t), q = p + d * t;
+    col += thr * uGlow * (1.0 - T);
+    thr *= T;
+    if (t == td) {   // the duck's hull under the water, lit through the surface and by the glow around it
+      vec3 E = lightAt(q, L) * (0.1 + 0.3 * (0.5 + 0.5 * dn.y)) * exp(-ABSORB * max(LEVEL - q.y, 0.0));
+      return col + thr * YELLOW / PI * (E + uAmb * 0.5);
+    }
+    if (t == tf) return col + thr * floorColor(q);
+    vec3 n = t == ts ? -normalOf(wave(clamp(q.xz, -TANK.xz, TANK.xz))) : (tx < tz ? vec3(-sign(d.x), 0.0, 0.0) : vec3(0.0, 0.0, -sign(d.z)));
+    vec3 r = refract(d, n, IOR);
+    float F = dot(r, r) < 0.5 ? 1.0 : fresnel(-dot(r, n));
+    col += thr * (1.0 - F) * (t == ts ? look(q, r) : 0.9 * background(q, r));
+    thr *= F; p = q + n * 1e-3; d = reflect(d, n);
+  }
+  return col + thr * uGlow;
+}
+`;
+const VERT = /* glsl */`varying vec3 vPos; varying vec3 vNrm;
+void main() { vPos = (modelMatrix * vec4(position, 1.0)).xyz; vNrm = normal; gl_Position = projectionMatrix * viewMatrix * vec4(vPos, 1.0); }`;
+const OUT = '#include <tonemapping_fragment>\n#include <colorspace_fragment>\n';
+
+// Turn a distance function into triangles (naive surface nets): a vertex in every grid cell the surface
+// passes through (the average of where it crosses the cell's edges, pulled onto the surface), and a
+// quad across every grid edge it crosses. Normals come from the function's gradient, so the shading is
+// smooth. Points more than four cells from the surface skip the full evaluation (a coarse pass first).
+const EDGES = [];
+for (let c = 0; c < 8; c++) for (const b of [1, 2, 4]) if (!(c & b)) EDGES.push(c, c | b);
+function surfaceNet(sdf, lo, hi, h, scale) {
+  const nx = Math.ceil((hi[0] - lo[0]) / h) + 1, ny = Math.ceil((hi[1] - lo[1]) / h) + 1, nz = Math.ceil((hi[2] - lo[2]) / h) + 1, S = [1, nx, nx * ny];
+  const V = new Float32Array(nx * ny * nz), id = new Int32Array(nx * ny * nz).fill(-1), P = [], N = [], I = [];
+  const mx = (nx >> 2) + 2, my = (ny >> 2) + 2, C = new Float32Array(mx * my * ((nz >> 2) + 2));
+  for (let k = 0, q = 0; q < C.length; k++) for (let j = 0; j < my; j++) for (let i = 0; i < mx; i++, q++) C[q] = sdf(lo[0] + 4 * i * h, lo[1] + 4 * j * h, lo[2] + 4 * k * h);
+  for (let k = 0, q = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++, q++) {
+    const c = C[(((k + 2) >> 2) * my + ((j + 2) >> 2)) * mx + ((i + 2) >> 2)];
+    V[q] = Math.abs(c) > 4 * h ? c : sdf(lo[0] + i * h, lo[1] + j * h, lo[2] + k * h);
+  }
+  const corner = [0, 1, 2, 3, 4, 5, 6, 7].map((c) => (c & 1) + (c >> 1 & 1) * S[1] + (c >> 2) * S[2]), e = h * 0.05;
+  for (let k = 0; k < nz - 1; k++) for (let j = 0; j < ny - 1; j++) for (let i = 0, q = (k * ny + j) * nx; i < nx - 1; i++, q++) {
+    let n = 0, sx = 0, sy = 0, sz = 0;
+    for (let a = 0; a < 24; a += 2) {
+      const c0 = EDGES[a], c1 = EDGES[a + 1], v0 = V[q + corner[c0]], v1 = V[q + corner[c1]];
+      if ((v0 < 0) === (v1 < 0)) continue;
+      const t = v0 / (v0 - v1);
+      sx += (c0 & 1) + ((c1 & 1) - (c0 & 1)) * t; sy += (c0 >> 1 & 1) + ((c1 >> 1 & 1) - (c0 >> 1 & 1)) * t; sz += (c0 >> 2) + ((c1 >> 2) - (c0 >> 2)) * t; n++;
+    }
+    if (!n) continue;
+    let x = lo[0] + (i + sx / n) * h, y = lo[1] + (j + sy / n) * h, z = lo[2] + (k + sz / n) * h;
+    for (let it = 0; it < 2; it++) {   // one step onto the surface, then the normal there
+      const d = sdf(x, y, z), gx = sdf(x + e, y, z) - d, gy = sdf(x, y + e, z) - d, gz = sdf(x, y, z + e) - d, l = Math.hypot(gx, gy, gz) || 1;
+      if (it) N.push(gx / l, gy / l, gz / l); else { const m = Math.max(-h / 2, Math.min(h / 2, d)) / l; x -= m * gx; y -= m * gy; z -= m * gz; }
+    }
+    id[q] = P.length / 3; P.push(x * scale, y * scale, z * scale);
+  }
+  for (let k = 1; k < nz - 1; k++) for (let j = 1; j < ny - 1; j++) for (let i = 1, q = (k * ny + j) * nx + 1; i < nx - 1; i++, q++) {
+    const inside = V[q] < 0;
+    for (let a = 0; a < 3; a++) {   // the grid edge from here along axis a crosses the surface: join the four cells around it
+      if ((V[q + S[a]] < 0) === inside) continue;
+      const b = S[(a + 1) % 3], c = S[(a + 2) % 3], q00 = id[q - b - c], q10 = id[q - c], q11 = id[q], q01 = id[q - b];
+      if (q00 < 0 || q10 < 0 || q11 < 0 || q01 < 0) continue;
+      if (inside) I.push(q00, q10, q11, q00, q11, q01); else I.push(q00, q11, q10, q00, q01, q11);
+    }
+  }
+  return { P, N, I };
+}
+
+async function gpuRenderer(canvas) {
+  // start loading three.js, and meanwhile turn the duck's body and beak into triangles (surfaceNet)
+  const load = Promise.all(['three', 'three/addons/controls/OrbitControls.js', 'three/addons/misc/GPUComputationRenderer.js'].map((m) => import(m)));
+  const nets = [surfaceNet(duckBody, [-0.66, -0.02, -0.42], [0.56, 1.08, 0.42], 0.014, DS), surfaceNet(duckBeak, [0.33, 0.62, -0.16], [0.74, 0.84, 0.16], 0.0035, DS)];
+  const [THREE, { OrbitControls }, { GPUComputationRenderer }] = await load;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });   // throws without WebGL 2
+  const ext = renderer.extensions, scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(FOV, 1, 0.05, 2000);
+  if (!ext.has('EXT_color_buffer_float') && !ext.has('EXT_color_buffer_half_float')) throw new Error('no float render targets');
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  canvas.addEventListener('webglcontextrestored', () => location.reload());
+  camera.position.set(6.4 * Math.cos(0.34) * Math.sin(0.62), 0.55 + 6.4 * Math.sin(0.34), 6.4 * Math.cos(0.34) * Math.cos(0.62));
+  const controls = new OrbitControls(camera, canvas);
+  controls.target.set(...TARGET);
+  Object.assign(controls, { enableDamping: true, dampingFactor: 0.08, enablePan: false, minDistance: 3.6, maxDistance: 14, minPolarAngle: 0.22, maxPolarAngle: 1.51 });
+
+  // The ripple simulation: a height field (mm) on the GPU. Each cell moves toward the average of its
+  // neighbours and overshoots (the wave equation); ClampToEdge sampling makes the glass reflect them.
+  // Splashes add a bump; the duck's hull, moving and bobbing, pushes the water aside (see hull()).
+  const gpu = new GPUComputationRenderer(SIM[0], SIM[1], renderer).setDataType(THREE.HalfFloatType);
+  const sim = gpu.addVariable('heightmap', /* glsl */`
+    uniform vec4 uDrops[8], uDuck0, uDuck1;   // splashes: x, z, radius (m), height (mm); the hull before and after this step
+    float hull(vec2 p, vec4 d) {   // as hull()
+      vec2 q = p - d.xy, f = vec2(cos(d.z), sin(d.z)), u = vec2(dot(q, f), dot(q, vec2(-f.y, f.x))) / vec2(${f(FOOT[0])}, ${f(FOOT[1])});
+      float r = max(0.0, 1.0 - dot(u, u)); return d.w * r * r;
+    }
+    void main() {
+      vec2 cell = 1.0 / resolution.xy, uv = gl_FragCoord.xy * cell;
+      vec4 c = texture2D(heightmap, uv);
+      float nb = texture2D(heightmap, uv + vec2(0.0, cell.y)).r + texture2D(heightmap, uv - vec2(0.0, cell.y)).r
+               + texture2D(heightmap, uv + vec2(cell.x, 0.0)).r + texture2D(heightmap, uv - vec2(cell.x, 0.0)).r;
+      float h = (nb * 0.5 - c.g) * 0.994;
+      vec2 p = (uv - 0.5) * vec2(${f(2 * TX)}, ${f(2 * TZ)});
+      for (int i = 0; i < 8; i++) { vec2 q = (p - uDrops[i].xy) / uDrops[i].z; h += uDrops[i].w * exp(-dot(q, q)); }
+      h += ${f(PUSH)} * (hull(p, uDuck0) - hull(p, uDuck1));
+      h *= 1.0 - 0.15 * hull(p, vec4(uDuck1.xyz, 1.0));   // under the hull there is no free surface: it holds the water still
+      gl_FragColor = vec4(h, c.r, 0.0, 1.0);
+    }`, gpu.createTexture());
+  gpu.setVariableDependencies(sim, [sim]);
+  sim.minFilter = sim.magFilter = THREE.LinearFilter;
+  const dropU = new Float32Array(32), duck0 = new THREE.Vector4(), duck1 = new THREE.Vector4();
+  Object.assign(sim.material.uniforms, { uDrops: { value: dropU }, uDuck0: { value: duck0 }, uDuck1: { value: duck1 } });
+  const err = gpu.init(); if (err) throw new Error(err);
+
+  // uniforms shared by every material below
+  const U = { uTime: { value: 0 }, uLamp: { value: 0 }, uDay: { value: 1 }, uW: { value: waveUniform }, uA: { value: ampUniform },
+    uLight: { value: new THREE.Vector3() }, uLightCol: { value: new THREE.Vector3() }, uAmb: { value: new THREE.Vector3() },
+    uGlow: { value: new THREE.Vector3() }, uSim: { value: null }, uSurf: { value: null }, uCaus: { value: null },
+    uDuck: { value: new THREE.Vector4() }, uDuckOn: { value: 1 } };
+  // Once a frame, the sea's waves plus the ripples, with their slopes, into one texture that every
+  // shader below reads the water from.
+  const surfRT = gpu.createRenderTarget(0, 0, THREE.ClampToEdgeWrapping, THREE.ClampToEdgeWrapping, THREE.LinearFilter, THREE.LinearFilter);
+  const surfMat = gpu.createShaderMaterial(/* glsl */`
+    uniform float uTime;
+    uniform vec4 uW[${NW}];     // per wave: direction * wavenumber, angular speed, phase
+    uniform float uA[${NW}];    // per wave: height now (m)
+    uniform sampler2D uSim;
+    void main() {
+      vec2 uv = gl_FragCoord.xy / resolution.xy, e = 1.0 / resolution.xy, p = (uv - 0.5) * vec2(${f(2 * TX)}, ${f(2 * TZ)});
+      vec3 w = vec3(0.0);
+      for (int i = 0; i < ${NW}; i++) {   // as waveAt(): each wave's crests are bent by a slower wave running along them
+        vec2 kd = uW[i].xy, side = vec2(-kd.y, kd.x) / length(kd);
+        float kb = 0.37 * length(kd), pb = kb * dot(side, p) + 0.9 * uTime + 7.1 * float(i);
+        float ph = dot(kd, p) - uW[i].z * uTime + uW[i].w + 1.6 * sin(pb);
+        w += uA[i] * vec3(sin(ph), cos(ph) * (kd + 1.6 * kb * cos(pb) * side));
+      }
+      float h = texture2D(uSim, uv).r;   // + the ripples (mm)
+      float hx = texture2D(uSim, uv + vec2(e.x, 0.0)).r - texture2D(uSim, uv - vec2(e.x, 0.0)).r;
+      float hz = texture2D(uSim, uv + vec2(0.0, e.y)).r - texture2D(uSim, uv - vec2(0.0, e.y)).r;
+      gl_FragColor = vec4(w + 0.001 * vec3(h, hx * resolution.x / ${f(4 * TX)}, hz * resolution.y / ${f(4 * TZ)}), 1.0);
+    }`, { uTime: U.uTime, uW: U.uW, uA: U.uA, uSim: U.uSim });
+  const mat = (frag, o = {}) => new THREE.ShaderMaterial(Object.assign({ uniforms: U, vertexShader: VERT, fragmentShader: 'varying vec3 vPos; varying vec3 vNrm;\n' + COMMON + frag }, o));
+
+  // Caustics. Every vertex of a fine grid on the surface sends a light ray through the water to the
+  // floor, and the grid is drawn where the rays land. A cell of surface that lands on a smaller patch
+  // of floor concentrates its light, so each fragment gets the area ratio of the two (from screen-space
+  // derivatives), and overlapping patches add up.
+  const causRT = new THREE.WebGLRenderTarget(CAUS[0], CAUS[1], { type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+  const grid = new THREE.PlaneGeometry(2 * TX, 2 * TZ, SIM[0], SIM[1]).rotateX(-Math.PI / 2);
+  const causScene = new THREE.Scene(), flatCam = new THREE.Camera();
+  const causMesh = new THREE.Mesh(grid, new THREE.ShaderMaterial({ uniforms: U, side: THREE.DoubleSide, depthTest: false, depthWrite: false,
+    blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+    vertexShader: COMMON + /* glsl */`
+      varying vec2 vSurf; varying vec3 vI;
+      void main() {
+        vec3 w = wave(position.xz), P = vec3(position.x, LEVEL + w.x, position.z), n = normalOf(w);
+        vec3 d = uLamp > 0.5 ? P - uLight : -uLight, Lin = normalize(d);
+        float E = uLamp > 0.5 ? smoothstep(0.35, 0.75, -Lin.y) / dot(d, d) : 1.0;   // lamp: inverse square, inside the shade's cone
+        vec3 r = refract(Lin, n, 1.0 / IOR);
+        float t = P.y / max(-r.y, 0.05);
+        vec3 F = P + r * t;
+        vI = E * max(-Lin.y, 0.0) * (1.0 - fresnel(dot(-Lin, n))) * exp(-ABSORB * t);
+        vI *= mix(0.2, 1.0, duckClear(P, -Lin) * duckClear(P, r));   // the duck's shadow (a little light scatters into it)
+        vSurf = position.xz;
+        gl_Position = vec4(F.x / TANK.x, F.z / TANK.z, 0.0, 1.0);
+      }`,
+    fragmentShader: /* glsl */`
+      varying vec2 vSurf; varying vec3 vI;
+      void main() {
+        vec2 a = dFdx(vSurf), b = dFdy(vSurf);
+        gl_FragColor = vec4(vI * min(abs(a.x * b.y - a.y * b.x) / ${(4 * TX * TZ / (CAUS[0] * CAUS[1])).toExponential(6)}, 40.0), 1.0);
+      }` }));
+  causMesh.frustumCulled = false; causScene.add(causMesh);
+
+  // sky and ground
+  const skyDome = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), mat('void main() { gl_FragColor = vec4(sky(normalize(vPos - cameraPosition), 1.0), 1.0);\n' + OUT + '}', { side: THREE.BackSide, depthWrite: false }));
+  skyDome.renderOrder = -1;
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400).rotateX(-Math.PI / 2),
+    mat('void main() { gl_FragColor = vec4(ground(vPos, max(fwidth(vPos.x), fwidth(vPos.z))), 1.0);\n' + OUT + '}'));
+  // the water surface: moved by the waves, it reflects the sky and refracts the view into the water
+  const surface = new THREE.Mesh(grid, mat(/* glsl */`
+    void main() {
+      vec3 n = normalOf(wave(vPos.xz)), d = normalize(vPos - cameraPosition);
+      if (dot(d, n) > -0.02) n = normalize(n - d * (dot(d, n) + 0.02));
+      float F = fresnel(-dot(d, n));
+      gl_FragColor = vec4(F * look(vPos, reflect(d, n)) + (1.0 - F) * water(vPos, refract(d, n, 1.0 / IOR)), 1.0);
+      ${OUT}
+    }`, { vertexShader: COMMON + /* glsl */`
+      varying vec3 vPos; varying vec3 vNrm;
+      void main() { vPos = vec3(position.x, LEVEL + wave(position.xz).x, position.z); vNrm = vec3(0.0, 1.0, 0.0);
+        gl_Position = projectionMatrix * viewMatrix * vec4(vPos, 1.0); }` }));
+  surface.frustumCulled = false;
+  // the water behind the glass walls, up to the moving water line (above it the fragments are dropped)
+  const sideH = TOP - 0.02;
+  const sides = new THREE.Mesh(new THREE.BoxGeometry(2 * TX, sideH, 2 * TZ).translate(0, sideH / 2, 0), mat(/* glsl */`
+    void main() {
+      float h = LEVEL + wave(clamp(vPos.xz, -TANK.xz, TANK.xz)).x;
+      if (vPos.y > h || abs(vNrm.y) > 0.5) discard;
+      vec3 d = normalize(vPos - cameraPosition);
+      vec3 col = water(vPos, refract(d, vNrm, 1.0 / IOR));
+      float px = fwidth(vPos.y);   // the meniscus: a thin bright line where the water meets the glass
+      col = mix(col, 0.25 * look(vPos, reflect(d, vec3(0.0, 1.0, 0.0))) + uGlow * 4.0, 0.5 * (1.0 - smoothstep(px, 3.0 * px, h - vPos.y)));
+      gl_FragColor = vec4(col, 1.0);
+      ${OUT}
+    }`));
+  // glass: faint reflections (premultiplied: rgb = reflection, alpha = how much of the view it hides)
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(2 * TX + 0.012, TOP, 2 * TZ + 0.012).translate(0, TOP / 2, 0), mat(/* glsl */`
+    void main() {
+      if (abs(vNrm.y) > 0.5) discard;   // open top, and the floor is tiles
+      vec3 d = normalize(vPos - cameraPosition), n = normalize(vNrm) * (gl_FrontFacing ? 1.0 : -1.0);
+      float F = 0.04 + 0.96 * pow(1.0 - abs(dot(d, n)), 5.0);
+      gl_FragColor = vec4(F * background(vPos, reflect(d, n)), F + 0.04);
+      ${OUT}
+    }`, { transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor }));
+  // a dark frame along the edges, and the lamp (a shade, a warm bulb and a cord)
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2b3035, roughness: 0.45, metalness: 0.3 });
+  const frame = new THREE.Group(), e = 0.013;
+  for (const [sx, sy, sz, x, y, z] of [[2 * TX, e, e, 0, 0, TZ], [2 * TX, e, e, 0, 0, -TZ], [2 * TX, e, e, 0, TOP, TZ], [2 * TX, e, e, 0, TOP, -TZ],
+    [e, e, 2 * TZ, TX, 0, 0], [e, e, 2 * TZ, -TX, 0, 0], [e, e, 2 * TZ, TX, TOP, 0], [e, e, 2 * TZ, -TX, TOP, 0],
+    [e, TOP, e, TX, TOP / 2, TZ], [e, TOP, e, -TX, TOP / 2, TZ], [e, TOP, e, TX, TOP / 2, -TZ], [e, TOP, e, -TX, TOP / 2, -TZ]]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(sx + e, sy, sz + e), dark);
+    b.position.set(x, y, z); frame.add(b);
+  }
+  const lampRig = new THREE.Group(), bulbMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 3.2, 2.3) });
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.045, 20, 12), bulbMat);
+  const shade = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.17, 28, 1, true).translate(0, 0.02, 0), new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide }));
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 8).translate(0, 4.1, 0), dark);
+  const sunLight = new THREE.DirectionalLight(0xffffff, 2.5), lampLight = new THREE.PointLight(0xffd9a0, 12, 0, 2), hemi = new THREE.HemisphereLight(0xbcd2ea, 0x3a3f44, 0.9);
+  lampRig.add(bulb, shade, cord, lampLight);
+  // the rubber duck: its body and beak (meshed at the start), and two eyes with pupils
+  const plastic = (r, g, b, roughness) => new THREE.MeshStandardMaterial({ color: new THREE.Color(r, g, b), roughness });
+  const yellow = plastic(0.92, 0.6, 0.012, 0.3), duckMesh = new THREE.Group();
+  yellow.emissive.set(0x3d2300);   // vinyl lets a little light through: warm, even in the shade
+  for (const [{ P, N, I }, m] of [[nets[0], yellow], [nets[1], plastic(0.95, 0.2, 0.01, 0.3)]]) {
+    const g = new THREE.BufferGeometry().setIndex(I);
+    duckMesh.add(new THREE.Mesh(g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)).setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)), m));
+  }
+  // each eye: a white ball, and its pupil a black cap on it (where the ball is within 0.032 of a point
+  // just inside it, as pupil() says: 0.6 rad round the direction to that point), drawn just in front of it
+  const white = plastic(0.82, 0.82, 0.82, 0.1), black = plastic(0.006, 0.006, 0.006, 0.1);
+  Object.assign(black, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
+  for (const sz of [1, -1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(EYE[3] * DS, 40, 28), white), cap = new THREE.Mesh(new THREE.SphereGeometry(EYE[3] * DS * 1.004, 40, 8, 0, 2 * Math.PI, 0, 0.6), black);
+    cap.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0.03, 0.006, 0.022 * sz).normalize());
+    eye.position.set(EYE[0] * DS, EYE[1] * DS, sz * EYE[2] * DS); eye.add(cap); duckMesh.add(eye);
+  }
+  scene.add(skyDome, floor, sides, surface, glass, frame, lampRig, duckMesh, sunLight, hemi);
+
+  // clicks on the water make ripples (and push the duck)
+  const ray = new THREE.Raycaster(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -LEVEL), hit = new THREE.Vector3();
+  let down = null;
+  canvas.addEventListener('pointerdown', (ev) => { down = [ev.clientX, ev.clientY, performance.now()]; });
+  canvas.addEventListener('pointerup', (ev) => {
+    if (!down || Math.hypot(ev.clientX - down[0], ev.clientY - down[1]) > 6 || performance.now() - down[2] > 500) return;
+    const r = canvas.getBoundingClientRect();
+    ray.setFromCamera(new THREE.Vector2((ev.clientX - r.left) / r.width * 2 - 1, 1 - (ev.clientY - r.top) / r.height * 2), camera);
+    if (ray.ray.intersectPlane(plane, hit) && Math.abs(hit.x) < TX && Math.abs(hit.z) < TZ) poke(hit.x, hit.z);
+  });
+
+  let simAcc = 0; const size = new THREE.Vector2();
+  return {
+    name: 'GPU · three.js r' + THREE.REVISION, minScale: 0.35, maxScale: Math.min(devicePixelRatio || 1, 2), target: 50, controls,
+    setView(yaw, pitch, dist) { camera.position.set(TARGET[0] + dist * Math.cos(pitch) * Math.sin(yaw), TARGET[1] + dist * Math.sin(pitch), TARGET[2] + dist * Math.cos(pitch) * Math.cos(yaw)); controls.update(); },
+    draw(dt, L) {
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (renderer.getPixelRatio() !== state.scale) renderer.setPixelRatio(state.scale);
+      if (renderer.getSize(size).x !== w || size.y !== h) renderer.setSize(w, h, false);
+      camera.aspect = w / Math.max(1, h);
+      camera.fov = 2 * Math.atan(Math.tan(FOV * Math.PI / 360) / Math.min(1, camera.aspect)) * 180 / Math.PI;   // portrait: keep the tank's width
+      camera.updateProjectionMatrix();
+      controls.update();
+      // the ripple simulation steps at 60 Hz, moving the duck and taking up to 8 waiting splashes per step
+      for (simAcc = Math.min(simAcc + dt, 0.1); simAcc >= 1 / 60; simAcc -= 1 / 60) {
+        const [a, b] = duckStep(1 / 60, state.turb);
+        duck0.set(...a); duck1.set(...b);
+        for (let i = 0; i < 8; i++) dropU.set(drops.length ? drops.shift() : [0, 0, 1, 0], i * 4);
+        gpu.compute();
+      }
+      U.uTime.value = state.t; U.uLamp.value = L.lamp ? 1 : 0; U.uDay.value = L.day;
+      U.uLight.value.set(...L.pos); U.uLightCol.value.set(...L.col); U.uAmb.value.set(...L.amb); U.uGlow.value.set(...L.glow);
+      U.uSim.value = gpu.getCurrentRenderTarget(sim).texture;
+      gpu.doRenderTarget(surfMat, surfRT); U.uSurf.value = surfRT.texture;
+      const dy = LEVEL + DUCK.y - DRAFT;   // the duck's flat base, under the water line
+      U.uDuck.value.set(DUCK.x, dy, DUCK.z, DUCK.head); U.uDuckOn.value = DUCK.on ? 1 : 0;
+      duckMesh.visible = DUCK.on; duckMesh.position.set(DUCK.x, dy, DUCK.z);
+      duckMesh.rotation.set(DUCK.roll, -DUCK.head, DUCK.pitch, 'YZX');
+      // redraw the caustics, then the scene
+      U.uCaus.value = null;
+      renderer.setRenderTarget(causRT); renderer.setClearColor(0x000000, 0); renderer.clear(); renderer.render(causScene, flatCam);
+      renderer.setRenderTarget(null); U.uCaus.value = causRT.texture;
+      lampRig.visible = lampLight.visible = L.lamp; sunLight.visible = !L.lamp;
+      if (L.lamp) lampRig.position.set(...L.pos); else sunLight.position.set(...L.pos).multiplyScalar(10);
+      hemi.intensity = L.lamp ? 0.05 : 1.3 * L.day;
+      renderer.render(scene, camera);
+    },
+  };
+}
+
+// ================================================================= CPU renderer: the same scene in JavaScript
+// Per frame the waves (and a coarse ripple simulation) are sampled once on a grid over the tank, and
+// the caustics once on a grid over the floor; every pixel then looks those up.
+function cpuRenderer(canvas) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const low = document.createElement('canvas'), lctx = low.getContext('2d');
+  const GX = 96, GZ = 60, grid = new Float32Array(GX * GZ * 3);   // height and slope, 3.8 cm apart
+  let rip = new Float32Array(GX * GZ), old = new Float32Array(GX * GZ), simAcc = 0;   // ripples (mm)
+  const CX = 128, CZ = 80, caus = new Float32Array(CX * CZ * 3);  // light on the floor (rgb)
+  const LUT = new Uint8ClampedArray(2048);                         // tone curve, indexed by sqrt(linear / 16)
+  for (let i = 0; i < 2048; i++) { const x = (i / 2047) ** 2 * 16; LUT[i] = 255 * Math.min(1, x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14)) ** (1 / 2.2); }
+  let img = null, L, cam, hRes = 1;
+  const w3 = [0, 0, 0], w5 = [0, 0, 0, 0, 0], v = [0, 0, 0], c = [0, 0, 0], c2 = [0, 0, 0], ev = [0, 0, 0], dn = [0, 0, 0];
+  let part = 0;   // what of the duck duckSDF() found nearest: 0 body, 1 beak, 2 eye, 3 pupil
+  const view = { yaw: 0.62, pitch: 0.34, dist: 6.4 };
+
+  function stepRipples([a, b]) {   // the wave equation on a coarse grid, with the waiting splashes and the duck's hull (before, after)
+    const b1 = [b[0], b[1], b[2], 1];
+    for (const [x, z, r, hh] of drops.splice(0)) for (let j = 0; j < GZ; j++) for (let i = 0; i < GX; i++) {
+      const qx = ((i / (GX - 1)) * 2 - 1) * TX - x, qz = ((j / (GZ - 1)) * 2 - 1) * TZ - z, r2 = Math.max(r, 0.05) ** 2;
+      rip[j * GX + i] += hh * Math.exp(-(qx * qx + qz * qz) / r2);
+    }
+    for (let j = 0; j < GZ; j++) for (let i = 0; i < GX; i++) {
+      const k = j * GX + i, n = rip[k - (j > 0 ? GX : 0)] + rip[k + (j < GZ - 1 ? GX : 0)] + rip[k - (i > 0 ? 1 : 0)] + rip[k + (i < GX - 1 ? 1 : 0)];
+      const x = (i / (GX - 1) * 2 - 1) * TX, z = (j / (GZ - 1) * 2 - 1) * TZ;
+      old[k] = ((n * 0.5 - old[k]) * 0.985 + PUSH * (hull(x, z, a) - hull(x, z, b))) * (1 - 0.35 * hull(x, z, b1));   // held still under the hull
+    }
+    [rip, old] = [old, rip];
+  }
+  function duckSDF(x, y, z) {   // the whole duck (duck units): distance, and part
+    let d = duckBody(x, y, z), b = duckBeak(x, y, z); part = 0;
+    if (b < d) { d = b; part = 1; }
+    const ex = x - EYE[0], ey = y - EYE[1], ez = Math.abs(z) - EYE[2], e = Math.sqrt(ex * ex + ey * ey + ez * ez) - EYE[3];
+    if (e < d) { d = e; part = pupil(x, y, z) ? 3 : 2; }
+    return d;
+  }
+  function duckHit(ox, oy, oz, dx, dy, dz) {   // as duck() in the shader, for the whole duck: distance (0 inside, 1e9 on a miss); normal -> dn
+    if (!DUCK.on) return 1e9;
+    const f0 = Math.cos(DUCK.head), f1 = Math.sin(DUCK.head), qx = (ox - DUCK.x) / DS, qy = (oy - LEVEL - DUCK.y + DRAFT) / DS, qz = (oz - DUCK.z) / DS;
+    const o0 = qx * f0 + qz * f1, o2 = qz * f0 - qx * f1, d0 = dx * f0 + dz * f1, d2 = dz * f0 - dx * f1;
+    const cx = o0 - 0.05, cy = qy - 0.53, b = cx * d0 + cy * dy + o2 * d2, h = b * b - (cx * cx + cy * cy + o2 * o2) + 0.9;   // a ball round it
+    if (h < 0) return 1e9;
+    for (let t = Math.max(-b - Math.sqrt(h), 0), i = 0; i < 48 && t < Math.sqrt(h) - b; i++) {
+      const px = o0 + d0 * t, py = qy + dy * t, pz = o2 + d2 * t, e = duckSDF(px, py, pz);
+      if (e < 0.003) {
+        const k = part, g = 0.003, nx = duckSDF(px + g, py, pz) - duckSDF(px - g, py, pz), ny = duckSDF(px, py + g, pz) - duckSDF(px, py - g, pz), nz = duckSDF(px, py, pz + g) - duckSDF(px, py, pz - g);
+        const wx = nx * f0 - nz * f1, wz = nx * f1 + nz * f0, l = Math.hypot(wx, ny, wz) || 1;
+        dn[0] = wx / l; dn[1] = ny / l; dn[2] = wz / l; part = k;
+        return t * DS;
+      }
+      t += e;
+    }
+    return 1e9;
+  }
+  function duckColor(px, py, pz, o) {   // the duck's plastic at a point of it, normal dn: in the light above the water, dimmer below
+    const E = incoming(px, py, pz), below = LEVEL + DUCK.y - py, nl = -(dn[0] * ev[0] + dn[1] * ev[1] + dn[2] * ev[2]);
+    const Y = [[0.92, 0.6, 0.012], [0.95, 0.2, 0.01], [0.82, 0.82, 0.82], [0.006, 0.006, 0.006]][part];
+    for (let n = 0; n < 3; n++) o[n] = Y[n] / Math.PI * (below > 0 ? L.col[n] * E * (0.1 + 0.3 * (0.5 + 0.5 * dn[1])) * Math.exp(-ABSORB[n] * below) + L.amb[n] * 0.5 : L.col[n] * E * Math.max(nl, 0) + L.amb[n]);
+  }
+  function surf(x, z) {   // bilinear lookup of height and slope -> w3
+    const gu = Math.min(Math.max((x / TX + 1) * 0.5 * (GX - 1), 0), GX - 1.001), gv = Math.min(Math.max((z / TZ + 1) * 0.5 * (GZ - 1), 0), GZ - 1.001);
+    const i = gu | 0, j = gv | 0, fu = gu - i, fv = gv - j, k = (j * GX + i) * 3, k2 = k + GX * 3;
+    for (let n = 0; n < 3; n++) w3[n] = (grid[k + n] * (1 - fu) + grid[k + 3 + n] * fu) * (1 - fv) + (grid[k2 + n] * (1 - fu) + grid[k2 + 3 + n] * fu) * fv;
+  }
+  function refract(ix, iy, iz, nx, ny, nz, eta) {   // -> v; false on total internal reflection
+    const d = nx * ix + ny * iy + nz * iz, k = 1 - eta * eta * (1 - d * d), m = eta * d + Math.sqrt(k);
+    if (k < 0) return false;
+    v[0] = eta * ix - m * nx; v[1] = eta * iy - m * ny; v[2] = eta * iz - m * nz; return true;
+  }
+  const fresnel = (cs) => { const m = 1 - Math.min(Math.max(cs, 0), 1), m2 = m * m; return 0.02 + 0.98 * m2 * m2 * m; };
+  const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+  function surfNormal(x, z) { surf(x, z); const l = Math.sqrt(w3[1] * w3[1] + 1 + w3[2] * w3[2]); v[0] = -w3[1] / l; v[1] = 1 / l; v[2] = -w3[2] / l; }
+  function incoming(x, y, z) {   // direction of the light arriving at (x, y, z) -> ev, returns its irradiance factor
+    if (!L.lamp) { ev[0] = -L.pos[0]; ev[1] = -L.pos[1]; ev[2] = -L.pos[2]; return 1; }
+    const dx = x - L.pos[0], dy = y - L.pos[1], dz = z - L.pos[2], r2 = dx * dx + dy * dy + dz * dz, l = Math.sqrt(r2);
+    ev[0] = dx / l; ev[1] = dy / l; ev[2] = dz / l;
+    return smooth(0.35, 0.75, -ev[1]) / r2;
+  }
+  let lx = 0, lz = 0, lE = 0, lt = 0;
+  function land(x, z) {   // where the light through surface point (x, z) lands on the floor -> lx, lz; lE, lt: its strength, path in water
+    surfNormal(x, z); const nx = v[0], ny = v[1], nz = v[2], y = LEVEL + w3[0];
+    lE = incoming(x, y, z) * Math.max(-ev[1], 0) * (1 - fresnel(-(ev[0] * nx + ev[1] * ny + ev[2] * nz)));
+    refract(ev[0], ev[1], ev[2], nx, ny, nz, 1 / IOR);
+    lt = y / Math.max(-v[1], 0.05); lx = x + v[0] * lt; lz = z + v[2] * lt;
+    lE *= 0.2 + 0.8 * duckClear(x, y, z, -ev[0], -ev[1], -ev[2]) * duckClear(x, y, z, v[0], v[1], v[2]);   // the duck's shadow
+  }
+  function duckClear(px, py, pz, dx, dy, dz) {   // as duckClear() in the shader
+    if (!DUCK.on) return 1;
+    const f0 = Math.cos(DUCK.head), f1 = Math.sin(DUCK.head), qx = (px - DUCK.x) / DS, qy = (py - LEVEL - DUCK.y + DRAFT) / DS, qz = (pz - DUCK.z) / DS;
+    const o0 = qx * f0 + qz * f1, o2 = qz * f0 - qx * f1, e0 = dx * f0 + dz * f1, e2 = dz * f0 - dx * f1;
+    const pass = (a0, a1, a2, b0, b1, b2) => { const s = Math.max(-(a0 * b0 + a1 * b1 + a2 * b2) / (b0 * b0 + b1 * b1 + b2 * b2), 0); return smooth(0.7, 1.35, Math.hypot(a0 + b0 * s, a1 + b1 * s, a2 + b2 * s)); };
+    return pass(o0 / 0.5, (qy - 0.28) / 0.3, o2 / 0.37, e0 / 0.5, dy / 0.3, e2 / 0.37)                    // the body
+         * pass((o0 - 0.25) / 0.25, (qy - 0.8) / 0.25, o2 / 0.25, e0 / 0.25, dy / 0.25, e2 / 0.25);        // the head
+  }
+  function prepare(dt) {
+    simAcc = Math.min(simAcc + dt, 0.2);
+    while (simAcc >= 1 / 22) { simAcc -= 1 / 22; stepRipples(duckStep(1 / 22, state.turb)); }   // coarser cells: fewer steps for the same wave speed
+    const sx = (GX - 1) / (4 * TX) * 0.001, sz = (GZ - 1) / (4 * TZ) * 0.001;   // central differences, mm -> m
+    for (let j = 0; j < GZ; j++) for (let i = 0; i < GX; i++) {
+      const k = j * GX + i;
+      waveAt((i / (GX - 1) * 2 - 1) * TX, (j / (GZ - 1) * 2 - 1) * TZ, w5);
+      grid[k * 3] = w5[0] + 0.001 * rip[k];
+      grid[k * 3 + 1] = w5[1] + (rip[i < GX - 1 ? k + 1 : k] - rip[i > 0 ? k - 1 : k]) * sx;
+      grid[k * 3 + 2] = w5[2] + (rip[j < GZ - 1 ? k + GX : k] - rip[j > 0 ? k - GX : k]) * sz;
+    }
+    for (let j = 0; j < CZ; j++) for (let i = 0; i < CX; i++) {   // find the surface point lighting each floor cell, compare areas
+      const qx = ((i + 0.5) / CX * 2 - 1) * TX, qz = ((j + 0.5) / CZ * 2 - 1) * TZ;
+      land(qx, qz); let px = 2 * qx - lx, pz = 2 * qz - lz;
+      land(px, pz); px += qx - lx; pz += qz - lz;
+      land(px + 0.01, pz); const ax = lx, az = lz;
+      land(px, pz + 0.01); const bx = lx, bz = lz;
+      land(px, pz);
+      const ratio = Math.min(1e-4 / Math.max(Math.abs((ax - lx) * (bz - lz) - (az - lz) * (bx - lx)), 1e-7), 10), k = (j * CX + i) * 3;
+      for (let n = 0; n < 3; n++) caus[k + n] = lE * ratio * Math.exp(-ABSORB[n] * lt);
+    }
+  }
+  function causticAt(x, z, o) {
+    const u = Math.min(Math.max((x / TX + 1) * 0.5 * CX - 0.5, 0), CX - 1.001), w = Math.min(Math.max((z / TZ + 1) * 0.5 * CZ - 0.5, 0), CZ - 1.001);
+    const i = u | 0, j = w | 0, fu = u - i, fv = w - j, k = (j * CX + i) * 3, kk = k + CX * 3;
+    for (let n = 0; n < 3; n++) o[n] = (caus[k + n] * (1 - fu) + caus[k + 3 + n] * fu) * (1 - fv) + (caus[kk + n] * (1 - fu) + caus[kk + 3 + n] * fu) * fv;
+  }
+  function sky(dx, dy, dz, o, disk = 1) {
+    if (L.lamp) { const m = 1.2 - 0.6 * Math.min(Math.max(dy, 0), 1); o[0] = 0.01 * m; o[1] = 0.014 * m; o[2] = 0.026 * m; return; }
+    const s = dx * L.pos[0] + dy * L.pos[1] + dz * L.pos[2], m = Math.sqrt(Math.min(Math.max(dy, 0), 1)), d = L.day;
+    const g1 = Math.max(s, 0), g4 = g1 * g1 * g1 * g1, g8 = g4 * g4;
+    const glow = g8 * g8 * g8 * 0.12 + g4 * 0.05 * (1 - Math.abs(dy)) + (disk ? (s > 0.99985 ? Math.min(1, (s - 0.99985) / 1e-4) * 60 : 0) : g1 ** 900 * 7);
+    o[0] = (0.56 - 0.41 * m) * d + L.col[0] * glow; o[1] = (0.67 - 0.35 * m) * d + L.col[1] * glow; o[2] = (0.8 - 0.12 * m) * d + L.col[2] * glow;
+  }
+  function look(px, py, pz, dx, dy, dz, o) {   // sky, and the lamp's bulb
+    sky(dx, dy, dz, o, 0);
+    if (!L.lamp) return;
+    const bx = L.pos[0] - px, by = L.pos[1] - py, bz = L.pos[2] - pz, b2 = bx * bx + by * by + bz * bz, s = smooth(0.998, 0.9997, (dx * bx + dy * by + dz * bz) / Math.sqrt(b2)) * 1.5 / Math.max(1, b2);
+    for (let n = 0; n < 3; n++) o[n] += L.col[n] * s;
+  }
+  function boxHit(ox, oy, oz, dx, dy, dz) {   // -> [tin, tout, entry-face axis]
+    const ax = (-TX - ox) / dx, bx = (TX - ox) / dx, ay = -oy / dy, by = (TOP - oy) / dy, az = (-TZ - oz) / dz, bz = (TZ - oz) / dz;
+    const nx = Math.min(ax, bx), ny = Math.min(ay, by), nz = Math.min(az, bz), tin = Math.max(nx, ny, nz);
+    return [tin, Math.min(Math.max(ax, bx), Math.max(ay, by), Math.max(az, bz)), tin === nx ? 0 : tin === ny ? 1 : 2];
+  }
+  function ground(px, pz, o) {
+    const cx = px - cam.pos[0], cz = pz - cam.pos[2], hd = Math.sqrt(cx * cx + cz * cz), dist = Math.sqrt(hd * hd + cam.pos[1] * cam.pos[1]);
+    const pix = dist * cam.tan * 2 / hRes, e = 0.5 - Math.max(Math.abs(px - Math.floor(px) - 0.5), Math.abs(pz - Math.floor(pz) - 0.5));
+    const line = (1 - Math.min(Math.max((e - 0.01) / pix, 0), 1)) * Math.min(1, 0.012 / pix);
+    const alb = (0.2 + 0.03 * ((Math.floor(px) + Math.floor(pz)) & 1)) * (1 - 0.45 * line) / Math.PI;
+    const E = incoming(px, 0, pz), ly = -ev[1], b = boxHit(px, 0, pz, -ev[0], -ev[1], -ev[2]), through = b[1] > Math.max(b[0], 0), len = b[1] - Math.max(b[0], 0);
+    const fog = 1 - Math.exp(-0.018 * dist);
+    sky(cx / hd, 0, cz / hd, c2, 0);
+    for (let n = 0; n < 3; n++) o[n] = alb * (L.col[n] * E * Math.max(ly, 0) * (through ? 0.7 * Math.exp(-ABSORB[n] * 0.7 * len) : 1) + L.amb[n]) * (1 - fog) + c2[n] * fog;
+  }
+  function background(px, py, pz, dx, dy, dz, o) { if (dy < 0) { const t = -py / dy; ground(px + dx * t, pz + dz * t, o); } else look(px, py, pz, dx, dy, dz, o); }
+  function surfaceT(ox, oy, oz, dx, dy, dz, tmax) {   // as surface() in the shader (also from above), fewer steps
+    let t0 = 0, f0 = -1e-4;
+    const sg = Math.sign(dy), dt = Math.min(tmax, (LEVEL + 0.3 * sg - oy) / dy) / 6;
+    const f = (t) => { surf(ox + dx * t, oz + dz * t); return sg * (oy + dy * t - LEVEL - w3[0]); };
+    for (let i = 1; i <= 6; i++) {
+      let t1 = dt * i, f1 = f(t1);
+      if (f1 > 0) {
+        for (let j = 0; j < 2; j++) { const tm = t0 + (t1 - t0) * f0 / (f0 - f1), fm = f(tm); if (fm > 0) { t1 = tm; f1 = fm; } else { t0 = tm; f0 = fm; } }
+        return t0 + (t1 - t0) * f0 / (f0 - f1);
+      }
+      t0 = t1; f0 = f1;
+    }
+    return 1e9;
+  }
+  function wallLight(qx, qz, o) {   // as wallLight() in the shader: sun through the glass walls below the water line
+    o[0] = o[1] = o[2] = 0;
+    if (L.lamp) return;
+    for (let a = 0; a < 2; a++) {
+      const sg = Math.sign(a ? L.pos[2] : L.pos[0]), ci = Math.abs(a ? L.pos[2] : L.pos[0]);
+      if (ci < 0.02) continue;
+      refract(-L.pos[0], -L.pos[1], -L.pos[2], a ? 0 : sg, 0, a ? sg : 0, 1 / IOR);
+      const tn = sg * (a ? v[2] : v[0]), u = (sg * (a ? qz : qx) - (a ? TZ : TX)) / tn, ey = -v[1] * u, side = a ? qx - v[0] * u : qz - v[2] * u;
+      if (ey >= LEVEL - 0.03 || Math.abs(side) >= (a ? TX : TZ)) continue;
+      const k = 0.8 * (1 - fresnel(ci)) * -v[1] * ci / Math.abs(tn);
+      for (let n = 0; n < 3; n++) o[n] += k * Math.exp(-ABSORB[n] * u);
+    }
+  }
+  function floorColor(qx, qz, o) {
+    const gx = Math.abs(qx * 5 - Math.floor(qx * 5) - 0.5), gz = Math.abs(qz * 5 - Math.floor(qz * 5) - 0.5);
+    const gr = Math.min(Math.max((Math.max(gx, gz) - 0.43) / 0.04, 0), 1), edge = Math.min(TX - Math.abs(qx), TZ - Math.abs(qz));
+    const shade = (0.55 + 0.45 * Math.min(Math.max(edge / 0.3, 0), 1)) / Math.PI, alb = [0.78 - 0.42 * gr, 0.83 - 0.4 * gr, 0.82 - 0.37 * gr];
+    causticAt(qx, qz, c2); wallLight(qx, qz, ev);
+    for (let n = 0; n < 3; n++) o[n] = alb[n] * shade * (L.col[n] * (c2[n] + ev[n]) + L.amb[n] * Math.exp(-ABSORB[n] * LEVEL * 1.5));
+  }
+  function water(px, py, pz, dx, dy, dz, o) {   // as water() in the shader
+    let r0 = 0, r1 = 0, r2 = 0, t0 = 1, t1 = 1, t2 = 1;
+    for (let i = 0; i < 3; i++) {
+      const tx = (Math.sign(dx) * TX - px) / dx, tz = (Math.sign(dz) * TZ - pz) / dz;
+      const tf = dy < 0 ? -py / dy : 1e9, ts = dy > 0 ? surfaceT(px, py, pz, dx, dy, dz, Math.min(tx, tz)) : 1e9;
+      const td = duckHit(px, py, pz, dx, dy, dz), t = Math.min(tf, ts, tx, tz, td);
+      const T0 = Math.exp(-ABSORB[0] * t), T1 = Math.exp(-ABSORB[1] * t), T2 = Math.exp(-ABSORB[2] * t);
+      r0 += t0 * L.glow[0] * (1 - T0); r1 += t1 * L.glow[1] * (1 - T1); r2 += t2 * L.glow[2] * (1 - T2);
+      t0 *= T0; t1 *= T1; t2 *= T2;
+      const qx = px + dx * t, qy = py + dy * t, qz = pz + dz * t;
+      if (t === td || t === tf) {   // the duck's hull, or the floor
+        if (t === td) duckColor(qx, qy, qz, c); else floorColor(qx, qz, c);
+        o[0] = r0 + t0 * c[0]; o[1] = r1 + t1 * c[1]; o[2] = r2 + t2 * c[2]; return;
+      }
+      let nx = 0, ny = 0, nz = 0;
+      if (t === ts) { surfNormal(qx, qz); nx = -v[0]; ny = -v[1]; nz = -v[2]; } else if (tx < tz) nx = -Math.sign(dx); else nz = -Math.sign(dz);
+      let F = 1;
+      if (refract(dx, dy, dz, nx, ny, nz, IOR)) {
+        F = fresnel(-(v[0] * nx + v[1] * ny + v[2] * nz));
+        if (t === ts) look(qx, qy, qz, v[0], v[1], v[2], c); else { background(qx, qy, qz, v[0], v[1], v[2], c); c[0] *= 0.9; c[1] *= 0.9; c[2] *= 0.9; }
+        r0 += t0 * (1 - F) * c[0]; r1 += t1 * (1 - F) * c[1]; r2 += t2 * (1 - F) * c[2];
+      }
+      t0 *= F; t1 *= F; t2 *= F;
+      const dn = 2 * (dx * nx + dy * ny + dz * nz);
+      dx -= dn * nx; dy -= dn * ny; dz -= dn * nz; px = qx + nx * 1e-3; py = qy + ny * 1e-3; pz = qz + nz * 1e-3;
+    }
+    o[0] = r0 + t0 * L.glow[0]; o[1] = r1 + t1 * L.glow[1]; o[2] = r2 + t2 * L.glow[2];
+  }
+  function trace(dx, dy, dz, o) {
+    const [ox, oy, oz] = cam.pos, b = boxHit(ox, oy, oz, dx, dy, dz);
+    if (!(b[0] < b[1] && b[0] > 0)) return background(ox, oy, oz, dx, dy, dz, o);
+    const px = ox + dx * b[0], py = oy + dy * b[0], pz = oz + dz * b[0];
+    let nx = 0, ny = 0, nz = 0, F = 0;
+    if (b[2] === 0) nx = -Math.sign(dx); else if (b[2] === 1) ny = -Math.sign(dy); else nz = -Math.sign(dz);
+    if (ny < 0.5) { const m = 1 - Math.abs(dx * nx + dz * nz), m2 = m * m; F = 0.04 + 0.96 * m2 * m2 * m; }
+    surf(px, pz);
+    if (ny < 0.5 && py < LEVEL + w3[0]) { refract(dx, dy, dz, nx, ny, nz, 1 / IOR); water(px, py, pz, v[0], v[1], v[2], o); }
+    else {
+      const t = dy < 0 ? surfaceT(px, py, pz, dx, dy, dz, b[1] - b[0] + 0.05) : 1e9, td = duckHit(px, py, pz, dx, dy, dz);
+      const qx = Math.min(Math.max(px + dx * t, -TX + 1e-3), TX - 1e-3), qz = Math.min(Math.max(pz + dz * t, -TZ + 1e-3), TZ - 1e-3);
+      if (td < Math.min(t, b[1] - b[0])) duckColor(px + dx * td, py + dy * td, pz + dz * td, o);   // the duck, above the water
+      else if (t < b[1] - b[0] + 0.05 && Math.abs(px + dx * t) < TX + 0.05 && Math.abs(pz + dz * t) < TZ + 0.05) {
+        surfNormal(qx, qz); const sx = v[0], sy = v[1], sz = v[2], d2 = 2 * (dx * sx + dy * sy + dz * sz), Fs = fresnel(-d2 / 2);
+        refract(dx, dy, dz, sx, sy, sz, 1 / IOR); water(qx, LEVEL + w3[0], qz, v[0], v[1], v[2], o);
+        look(qx, LEVEL, qz, dx - d2 * sx, dy - d2 * sy, dz - d2 * sz, c2);
+        for (let n = 0; n < 3; n++) o[n] = Fs * c2[n] + (1 - Fs) * o[n];
+      } else { const t2 = b[1]; background(ox + dx * t2, oy + dy * t2, oz + dz * t2, dx, dy, dz, o); o[0] *= 0.9; o[1] *= 0.9; o[2] *= 0.9; }
+    }
+    if (ny < 0.5) { const d2 = 2 * (dx * nx + dz * nz); sky(dx - d2 * nx, dy, dz - d2 * nz, c2); for (let n = 0; n < 3; n++) o[n] = F * c2[n] + (1 - F) * o[n] * [0.9, 0.96, 0.95][n]; }
+    const ex = Math.min(px + TX, TX - px), ey = Math.min(py, TOP - py), ez = Math.min(pz + TZ, TZ - pz);
+    const edge = ex + ey + ez - Math.max(ex, ey, ez) - Math.min(ex, ey, ez);
+    const fw = Math.max(0.01, b[0] * cam.tan * 2 / hRes / Math.max(Math.abs(dx * nx + dy * ny + dz * nz), 0.35));   // ~1 pixel, even edge-on
+    if (edge < fw * 1.6) { const k = 1 - Math.min(Math.max((edge - fw) / (0.6 * fw), 0), 1); for (let n = 0; n < 3; n++) o[n] += (0.05 - o[n]) * k; }
+  }
+  // camera: orbit with the pointer (as OrbitControls does on the GPU path)
+  const pointers = new Map(); let down = null;
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, [e.clientX, e.clientY]);
+    down = pointers.size === 1 ? [e.clientX, e.clientY, performance.now()] : null;
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    const p = pointers.get(e.pointerId);
+    if (!p) return;
+    if (pointers.size === 1) { view.yaw -= (e.clientX - p[0]) * 0.006; view.pitch = Math.min(1.35, Math.max(0.06, view.pitch + (e.clientY - p[1]) * 0.005)); }
+    else {
+      const [a, b] = [...pointers.values()], before = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      pointers.set(e.pointerId, [e.clientX, e.clientY]);
+      const [q, r] = [...pointers.values()];
+      view.dist = Math.min(14, Math.max(3.6, view.dist * before / Math.max(1, Math.hypot(q[0] - r[0], q[1] - r[1]))));
+    }
+    pointers.set(e.pointerId, [e.clientX, e.clientY]);
+  });
+  canvas.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); down = null; });
+  canvas.addEventListener('wheel', (e) => { e.preventDefault(); view.dist = Math.min(14, Math.max(3.6, view.dist * Math.exp(e.deltaY * 0.001))); }, { passive: false });
+  function camera() {
+    const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+    const pos = [TARGET[0] + view.dist * cp * Math.sin(view.yaw), TARGET[1] + view.dist * sp, TARGET[2] + view.dist * cp * Math.cos(view.yaw)];
+    const fw = [TARGET[0] - pos[0], TARGET[1] - pos[1], TARGET[2] - pos[2]], fl = Math.hypot(...fw), fx = fw[0] / fl, fy = fw[1] / fl, fz = fw[2] / fl;
+    const rl = Math.hypot(fz, fx), rx = -fz / rl, rz = fx / rl, ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;
+    return { pos, rot: [rx, 0, rz, ux, uy, uz, -fx, -fy, -fz], tan: Math.tan(FOV * Math.PI / 360) / Math.min(1, canvas.clientWidth / Math.max(1, canvas.clientHeight)) };
+  }
+  canvas.addEventListener('pointerup', (e) => {   // a click (not a drag) on the water: a ripple
+    pointers.delete(e.pointerId);
+    const ok = down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 6 && performance.now() - down[2] < 500;
+    down = null;
+    if (!ok) return;
+    const rect = canvas.getBoundingClientRect(), cm = camera(), r = cm.rot;
+    const u = ((e.clientX - rect.left) * 2 - rect.width) / rect.height * cm.tan, vv = (rect.height - (e.clientY - rect.top) * 2) / rect.height * cm.tan;
+    const d = [r[0] * u + r[3] * vv - r[6], r[1] * u + r[4] * vv - r[7], r[2] * u + r[5] * vv - r[8]], t = (LEVEL - cm.pos[1]) / d[1];
+    const x = cm.pos[0] + d[0] * t, z = cm.pos[2] + d[2] * t;
+    if (t > 0 && Math.abs(x) < TX && Math.abs(z) < TZ) poke(x, z);
+  });
+  return {
+    name: 'CPU fallback', minScale: 0.12, maxScale: 0.5, target: 24,
+    setView(yaw, pitch, dist) { Object.assign(view, { yaw, pitch, dist }); },
+    draw(dt, lit) {
+      cam = camera(); L = lit;
+      const cw = Math.round(canvas.clientWidth), ch = Math.round(canvas.clientHeight), w = Math.max(32, Math.round(cw * state.scale)), h = Math.max(24, Math.round(ch * state.scale));
+      hRes = h;
+      if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+      if (!img || img.width !== w || img.height !== h) { low.width = w; low.height = h; img = lctx.createImageData(w, h); }
+      prepare(dt);
+      const r = cam.rot, px = img.data;
+      for (let y = 0, k = 0; y < h; y++) for (let x = 0; x < w; x++, k += 4) {
+        const u = (2 * (x + 0.5) - w) / h * cam.tan, vv = (h - 2 * (y + 0.5)) / h * cam.tan;
+        let dx = r[0] * u + r[3] * vv - r[6], dy = r[1] * u + r[4] * vv - r[7], dz = r[2] * u + r[5] * vv - r[8];
+        const l = Math.sqrt(dx * dx + dy * dy + dz * dz); dx /= l; dy /= l; dz /= l;
+        trace(dx, dy, dz, c);
+        for (let n = 0; n < 3; n++) px[k + n] = LUT[Math.min(2047, Math.sqrt(Math.max(c[n], 0) / 16) * 2047 | 0)];
+        px[k + 3] = 255;
+      }
+      lctx.putImageData(img, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(low, 0, 0, canvas.width, canvas.height);
+      const dx = L.pos[0] - cam.pos[0], dy = L.pos[1] - cam.pos[1], dz = L.pos[2] - cam.pos[2], zc = -(dx * r[6] + dy * r[7] + dz * r[8]);
+      if (L.lamp && zc > 0) {   // the bulb
+        const sx = (dx * r[0] + dy * r[1] + dz * r[2]) / zc / cam.tan, sy = (dx * r[3] + dy * r[4] + dz * r[5]) / zc / cam.tan;
+        ctx.fillStyle = '#fff3d6'; ctx.beginPath(); ctx.arc(canvas.width / 2 + sx * canvas.height / 2, canvas.height / 2 - sy * canvas.height / 2, Math.max(2, 0.05 / zc / cam.tan * canvas.height / 2), 0, 7); ctx.fill();
+      }
+    },
+  };
+}
+
+// ================================================================= start-up, loop, input
+let canvas = $('view'), R = null;
+if (!new URLSearchParams(location.search).has('cpu'))
+  try { R = await gpuRenderer(canvas); } catch (e) { console.warn('three.js renderer unavailable, using the CPU:', e.message); }
+if (!R) {   // no WebGL 2 (or three.js could not load): a fresh canvas for the 2D context
+  const c2 = canvas.cloneNode(); canvas.replaceWith(c2); canvas = c2;
+  R = cpuRenderer(canvas);
+}
+state.scale = R.name.startsWith('CPU') ? 0.25 : Math.min(devicePixelRatio || 1, 1.5);
+if (innerWidth < 640) $('ui').open = false;
+
+const units = { elev: '°', az: '°', lampH: ' m', lampX: ' m' };
+for (const id of ['elev', 'az', 'lampH', 'lampX', 'waves', 'turb']) {
+  const show = () => { const x = +$(id).value; $(id + 'Out').textContent = units[id] ? x + units[id] : x.toFixed(2); };
+  $(id).addEventListener('input', show); show();
+}
+function setLamp(on) {
+  state.lamp = on; $('sunCtl').hidden = on; $('lampCtl').hidden = !on;
+  $('sun').setAttribute('aria-pressed', !on); $('lamp').setAttribute('aria-pressed', on);
+}
+$('sun').addEventListener('click', () => setLamp(false)); $('lamp').addEventListener('click', () => setLamp(true));
+$('duck').addEventListener('change', (e) => { DUCK.on = e.target.checked; });
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' && e.target.type === 'range' && e.key !== ' ') return;
+  const k = e.key.toLowerCase();
+  if (k === ' ') { state.paused = !state.paused; e.preventDefault(); }
+  else if (k === 'h') $('ui').hidden = !$('ui').hidden;
+  else if (k === 'l') setLamp(!state.lamp);
+  else if (k === 'd') $('duck').checked = DUCK.on = !DUCK.on;
+  else if (k === 'r') addRipple((Math.random() * 2 - 1) * TX * 0.8, (Math.random() * 2 - 1) * TZ * 0.8);
+});
+window.lite = { state, R, addRipple, poke, setLamp, DUCK };   // for scripted views and tests
+
+// render resolution adapts to hold a smooth frame rate: down quickly when slow, up slowly when there is room
+let last = performance.now(), frames = 0, elapsed = 0, calmUntil = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - last) / 1000), live = state.paused ? 0 : dt;
+  last = now; state.t += live; frames++; elapsed += dt;
+  if (elapsed > 0.5) {
+    const fps = frames / elapsed;
+    if (fps < R.target * 0.9) { state.scale = Math.max(R.minScale, state.scale * 0.85); calmUntil = now + 2500; }
+    else if (fps > R.target * 1.12 && now > calmUntil) state.scale = Math.min(R.maxScale, state.scale * 1.08);
+    $('stats').textContent = `${R.name} · ${fps.toFixed(0)} fps · ${Math.round(state.scale * 100)}% res`;
+    frames = 0; elapsed = 0;
+  }
+  state.waves = +$('waves').value; state.turb = +$('turb').value;
+  if (live > 0) turbulence(live);
+  waveHeights(state.t, state.waves, state.turb);
+  R.draw(live, light());
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

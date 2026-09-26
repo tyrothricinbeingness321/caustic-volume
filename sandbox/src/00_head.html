@@ -1,0 +1,232 @@
+<title>CAUSTIC//VOLUME</title>
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0e1012; --panel:rgba(14,16,18,.86); --line:rgba(95,227,255,.16); --line2:rgba(229,185,90,.28);
+  --ink:#d9e4e8; --dim:#7f8e95; --cyan:#5fe3ff; --gold:#e5b95a; --cream:#efe6d2;
+  --serif: Georgia, "Times New Roman", serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);overflow:hidden}
+body{font:12px/1.45 var(--mono);-webkit-font-smoothing:antialiased}
+#gl{position:fixed;inset:0;width:100%;height:100%;display:block;background:#000;touch-action:none;cursor:grab}
+#gl.drag{cursor:grabbing}
+.scan{position:relative}
+.scan::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(to bottom,rgba(255,255,255,.028) 0 1px,transparent 1px 3px);mix-blend-mode:screen}
+#panel{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:12px;width:292px;max-height:calc(100% - 24px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));
+  overflow-y:auto;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  scrollbar-width:thin;scrollbar-color:#2a3338 transparent;z-index:5}
+#panel.hidden{display:none}
+.hd{padding:14px 16px 10px;border-bottom:1px solid var(--line)}
+.hd h1{margin:0;font:400 21px/1.1 var(--serif);letter-spacing:.06em;color:var(--cream)}
+.hd h1 b{color:var(--cyan);font-weight:400}
+.hd p{margin:6px 0 0;color:var(--dim);font-size:11px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;padding:10px 16px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+.stats div{display:flex;justify-content:space-between;gap:8px;color:var(--dim)}
+.stats span{color:var(--ink)}
+.stats .big span{color:var(--cyan)}
+.sec{padding:10px 16px 12px;border-bottom:1px solid var(--line)}
+.sec h2{margin:0 0 8px;font:400 10px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--gold)}
+.row{display:grid;grid-template-columns:92px 1fr 40px;align-items:center;gap:8px;margin:5px 0}
+.row label{color:var(--dim);font-size:11px}
+.row output{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums;font-size:11px;white-space:nowrap}
+.row.w{grid-template-columns:92px 1fr 56px}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:2px;background:#2b353a}
+input[type=range]::-moz-range-track{height:2px;background:#2b353a}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:9px;height:14px;margin-top:-6px;background:var(--cyan);border:0;border-radius:0}
+input[type=range]::-moz-range-thumb{width:9px;height:14px;background:var(--cyan);border:0;border-radius:0}
+input[type=range]:focus-visible{outline:1px solid var(--gold);outline-offset:2px}
+select{width:100%;background:#12171a;color:var(--ink);border:1px solid #2b353a;border-radius:0;font:11px var(--mono);padding:4px 6px}
+select:focus-visible,button:focus-visible{outline:1px solid var(--gold);outline-offset:1px}
+.btns{display:flex;flex-wrap:wrap;gap:6px}
+button{font:11px var(--mono);letter-spacing:.06em;color:var(--ink);background:#14191c;border:1px solid #2e393e;border-radius:0;padding:6px 9px;cursor:pointer}
+button:hover{border-color:var(--cyan);color:#fff}
+button.pri{background:var(--cream);color:#111;border-color:var(--cream)}
+button.pri:hover{background:#fff}
+button.on{border-color:var(--cyan);color:var(--cyan)}
+.chk{display:flex;gap:14px;flex-wrap:wrap;margin-top:6px}
+.chk label{display:flex;align-items:center;gap:6px;color:var(--dim);cursor:pointer}
+.chk input{accent-color:var(--cyan);margin:0}
+.foot{padding:10px 16px 14px;color:var(--dim);font-size:10.5px;line-height:1.6}
+.foot kbd{font:10px var(--mono);color:var(--cream);border:1px solid #2e393e;padding:0 4px}
+#toggle{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:12px;z-index:6;display:none}
+#panel.hidden + #toggle{display:block}
+.tools{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.items{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.items button{padding:5px 4px;font-size:10.5px;letter-spacing:.02em;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#critBtns{grid-template-columns:repeat(2,1fr)}
+.sub{margin:8px 0 4px;color:var(--dim);font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+.tools button{padding:7px 0;text-align:center}
+.hint{margin:8px 0 0;color:var(--dim);font-size:10.5px;line-height:1.5;min-height:1.5em}
+.hint b{color:var(--gold);font-weight:400}
+.swatches{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:8px}
+.sw{height:26px;padding:0;border:1px solid #2e393e;cursor:pointer;position:relative}
+.sw.on{outline:1px solid var(--gold);outline-offset:2px}
+.swatches.sand{grid-template-columns:repeat(8,1fr);gap:4px}
+.swatches.sand .sw{height:22px}
+#sandMode{margin-bottom:0}
+.sw span{position:absolute;left:-9999px}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:8px}
+.seg3{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.seg3 button{padding:4px 0}
+.lrow{display:grid;grid-template-columns:1fr 58px 62px;gap:6px;align-items:center;margin:4px 0}
+.lrow[hidden]{display:none}
+.lrow button{text-align:left;padding:5px 8px}
+.lrow output{text-align:right;color:var(--dim);font-size:10.5px;font-variant-numeric:tabular-nums}
+input[type=color]{-webkit-appearance:none;appearance:none;width:100%;height:24px;padding:0;border:1px solid #2e393e;border-radius:0;background:#14191c;cursor:pointer}
+input[type=color]::-webkit-color-swatch-wrapper{padding:3px}
+input[type=color]::-webkit-color-swatch{border:0;border-radius:0}
+input[type=color]::-moz-color-swatch{border:0;border-radius:0}
+input[type=color]:focus-visible{outline:1px solid var(--gold);outline-offset:1px}
+#gl.tool{cursor:crosshair}
+#load{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:var(--bg);z-index:10;padding:0 16px;text-align:center}
+#load h1{margin:0;font:400 30px/1 var(--serif);letter-spacing:.08em;color:var(--cream)}
+#load h1 b{color:var(--cyan);font-weight:400}
+#load .bar{width:min(320px,80vw);height:2px;background:#20292d}
+#load .bar i{display:block;height:100%;width:0;background:var(--cyan);transition:width .2s}
+#load p{margin:0;color:var(--dim);max-width:560px;white-space:pre-wrap}
+#load.err p{color:#ffb4a0;text-align:left;font-size:11px;max-height:50vh;overflow:auto}
+#caption{position:fixed;right:14px;bottom:calc(12px + env(safe-area-inset-bottom,0px));color:rgba(217,228,232,.55);font-size:10.5px;letter-spacing:.08em;z-index:4;text-align:right;pointer-events:none}
+@media (max-width:640px){
+  #panel{width:calc(100% - 24px);max-height:55%;top:auto;bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  #toggle{top:auto;bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  #caption{display:none}
+}
+@media (prefers-reduced-motion: reduce){ #load .bar i{transition:none} }
+</style>
+
+<canvas id="gl"></canvas>
+
+<div id="panel" class="scan">
+  <div class="hd">
+    <h1>CAUSTIC<b>//</b>VOLUME</h1>
+    <p>Ray-traced water · photon caustics · buoyancy · ink · sand</p>
+  </div>
+  <div class="stats" id="stats">
+    <div class="big">fps <span id="sFps">–</span></div><div class="big">gpu <span id="sGpu">–</span></div>
+    <div>frame <span id="sMs">–</span></div><div>render <span id="sRes">–</span></div>
+    <div>photons <span id="sPh">–</span></div><div>tris/f <span id="sTri">–</span></div>
+    <div>objects <span id="sObj">–</span></div><div>bubbles <span id="sBub">–</span></div>
+  </div>
+  <div class="sec">
+    <h2>Tool</h2>
+    <div class="tools" id="tools">
+      <button data-t="orbit" class="on">Orbit</button><button data-t="drop">Drop</button><button data-t="ink">Ink</button><button data-t="stir">Stir</button>
+      <button data-t="sand">Sand</button><button data-t="lamp">Lamp</button><button data-t="laser">Laser</button>
+    </div>
+    <p class="hint" id="toolHint"></p>
+  </div>
+  <div class="sec">
+    <h2>View</h2>
+    <div class="btns" id="views">
+      <button data-v="1" class="on">Hero</button><button data-v="2">Glass</button><button data-v="3">Below</button>
+      <button data-v="4">Waterline</button><button data-v="5">Top</button><button data-v="6">Close</button>
+    </div>
+    <div class="chk"><label><input type="checkbox" id="cOrbit"> auto-orbit</label><label><input type="checkbox" id="cPause"> pause</label></div>
+  </div>
+  <div class="sec">
+    <h2>Objects</h2>
+    <div class="sub">Floats</div>
+    <div class="items" id="itemsFloat"></div>
+    <div class="sub">Sinks</div>
+    <div class="items" id="itemsSink"></div>
+    <div class="btns" style="margin-top:8px">
+      <button class="pri" id="bDrop">Random</button><button id="bSink">Sinker</button><button id="bFloat">Floater</button>
+      <button id="bSplash">Splash</button><button id="bClear">Clear</button>
+    </div>
+    <div class="row w" style="margin-top:8px"><label for="rMaxObj">Max objects</label><input type="range" id="rMaxObj" min="1" max="40" step="1"><output id="oMaxObj"></output></div>
+    <div class="chk"><label><input type="checkbox" id="cAuto"> auto-drop</label></div>
+  </div>
+  <div class="sec">
+    <h2>Creatures</h2>
+    <div class="items" id="critBtns"></div>
+    <div class="btns" style="margin-top:6px"><button id="bCritClear">Remove all</button></div>
+  </div>
+  <div class="sec">
+    <h2>Laser</h2>
+    <div class="btns"><button class="pri" id="bLaser">Laser on</button><button id="bLaserAim">Aim</button></div>
+    <div class="seg3" id="laserColor" style="margin-top:8px"><button data-c="green" class="on">Green</button><button data-c="red">Red</button><button data-c="violet">Violet</button></div>
+    <div class="seg3" id="laserMount" style="margin-top:4px"><button data-m="side" class="on">Side</button><button data-m="above">Above</button><button data-m="front">Front</button></div>
+    <div class="row" style="margin-top:8px"><label for="rLzHaze">Haze</label><input type="range" id="rLzHaze" min="0" max="1" step="0.01"><output id="oLzHaze"></output></div>
+    <div class="chk"><label><input type="checkbox" id="cLzSweep"> sweep the beam</label></div>
+  </div>
+  <div class="sec">
+    <h2>Ink</h2>
+    <div class="swatches" id="swatches"></div>
+    <div class="btns">
+      <button class="pri" id="bInk">Drop ink</button><button id="bRain">Ink rain</button><button id="bInkClear">Clear ink</button>
+    </div>
+    <div class="row" style="margin-top:8px"><label for="rInkSize">Drop size</label><input type="range" id="rInkSize" min="0.3" max="2.5" step="0.01"><output id="oInkSize"></output></div>
+    <div class="row"><label for="rInkPig">Pigment</label><input type="range" id="rInkPig" min="0" max="1" step="0.01"><output id="oInkPig"></output></div>
+    <div class="row"><label for="rInkSink">Sink rate</label><input type="range" id="rInkSink" min="0" max="1.5" step="0.01"><output id="oInkSink"></output></div>
+    <div class="row"><label for="rInkTurb">Turbulence</label><input type="range" id="rInkTurb" min="0" max="1.5" step="0.01"><output id="oInkTurb"></output></div>
+    <div class="row"><label for="rInkFade">Lingers</label><input type="range" id="rInkFade" min="15" max="400" step="1"><output id="oInkFade"></output></div>
+    <div class="chk"><label><input type="checkbox" id="cInkAuto"> auto ink</label></div>
+  </div>
+  <div class="sec">
+    <h2>Sand</h2>
+    <div class="swatches sand" id="sandSw"></div>
+    <div class="seg3" id="sandMode"><button data-m="single">Single</button><button data-m="cycle" class="on">Cycle</button><button data-m="mixed">Mixed</button></div>
+    <div class="btns" style="margin-top:8px"><button class="pri" id="bPour">Pour</button><button id="bSweep">Sweep</button><button id="bSandClear">Clear sand</button></div>
+    <div class="row w" style="margin-top:8px"><label for="rSandFlow">Flow</label><input type="range" id="rSandFlow" min="0.5" max="20" step="0.1"><output id="oSandFlow"></output></div>
+    <div class="row w"><label for="rSandGrain">Grain size</label><input type="range" id="rSandGrain" min="0.15" max="1.5" step="0.01"><output id="oSandGrain"></output></div>
+    <div class="row w"><label for="rSandCycle">Color cycle</label><input type="range" id="rSandCycle" min="1" max="40" step="0.5"><output id="oSandCycle"></output></div>
+    <p class="hint" id="sandInfo"></p>
+  </div>
+  <div class="sec">
+    <h2>Water</h2>
+    <div class="row"><label for="rSea">Sea state</label><input type="range" id="rSea" min="0" max="1" step="0.01"><output id="oSea"></output></div>
+    <div class="row"><label for="rChop">Choppiness</label><input type="range" id="rChop" min="0" max="1.6" step="0.01"><output id="oChop"></output></div>
+    <div class="row"><label for="rWind">Wind dir</label><input type="range" id="rWind" min="0" max="6.28" step="0.01"><output id="oWind"></output></div>
+    <div class="row"><label for="rPeak">Wavelength</label><input type="range" id="rPeak" min="0.4" max="3" step="0.01"><output id="oPeak"></output></div>
+    <div class="row"><label for="rClar">Turbidity</label><input type="range" id="rClar" min="0" max="4" step="0.01"><output id="oClar"></output></div>
+    <div class="row"><label for="rFoam">Foam</label><input type="range" id="rFoam" min="0" max="2" step="0.01"><output id="oFoam"></output></div>
+    <div class="row"><label for="rPart">Particulate</label><input type="range" id="rPart" min="0" max="1" step="0.01"><output id="oPart"></output></div>
+    <div class="row"><label for="sWater">Water</label><select id="sWater"></select><span></span></div>
+  </div>
+  <div class="sec">
+    <h2>Light</h2>
+    <div class="seg" id="lightMode"><button data-m="sun" class="on">Sun</button><button data-m="lamp">Lamp</button></div>
+    <div id="sunCtl">
+      <div class="row"><label for="rEl">Sun height</label><input type="range" id="rEl" min="6" max="88" step="0.5"><output id="oEl"></output></div>
+      <div class="row"><label for="rAz">Sun bearing</label><input type="range" id="rAz" min="0" max="360" step="1"><output id="oAz"></output></div>
+    </div>
+    <div id="lampCtl" hidden>
+      <div class="row"><label>Lamps</label><div class="seg3" id="lampCount"><button data-n="1" class="on">1</button><button data-n="2">2</button><button data-n="3">3</button></div><span></span></div>
+      <div id="lampList"></div>
+      <div class="row"><label for="rLampPow">Power</label><input type="range" id="rLampPow" min="0" max="3" step="0.01"><output id="oLampPow"></output></div>
+      <div class="row"><label for="rLampH">Height</label><input type="range" id="rLampH" min="1.75" max="3.6" step="0.01"><output id="oLampH"></output></div>
+      <div class="row"><label for="rLampBeam">Beam</label><input type="range" id="rLampBeam" min="10" max="75" step="0.5"><output id="oLampBeam"></output></div>
+      <div class="btns" style="margin:4px 0 6px"><button id="bPlaceLamp">Move lamp 1</button></div>
+    </div>
+    <div class="row"><label for="rGod">Light shafts</label><input type="range" id="rGod" min="0" max="3" step="0.01"><output id="oGod"></output></div>
+    <div class="row"><label for="rCaus">Caustics</label><input type="range" id="rCaus" min="0" max="3" step="0.01"><output id="oCaus"></output></div>
+    <div class="row"><label for="rExp">Exposure</label><input type="range" id="rExp" min="0.2" max="4" step="0.01"><output id="oExp"></output></div>
+    <div class="row"><label for="rBloom">Bloom</label><input type="range" id="rBloom" min="0" max="0.3" step="0.005"><output id="oBloom"></output></div>
+    <div class="row"><label for="rAper">Lens blur</label><input type="range" id="rAper" min="0" max="1.5" step="0.01"><output id="oAper"></output></div>
+    <div class="chk"><label><input type="checkbox" id="cDisp" checked> spectral dispersion</label></div>
+  </div>
+  <div class="sec">
+    <h2>Tank</h2>
+    <div class="row"><label for="sBottom">Bed</label><select id="sBottom"><option value="0">Rippled sand</option><option value="1">Pool tile</option><option value="2">Studio grid</option></select><span></span></div>
+    <div class="chk"><label><input type="checkbox" id="cGlass" checked> glass walls</label></div>
+  </div>
+  <div class="sec">
+    <h2>Quality</h2>
+    <div class="row"><label for="sQ">Preset</label><select id="sQ"></select><span></span></div>
+    <div class="row"><label for="rScale">Render scale</label><input type="range" id="rScale" min="0.25" max="2" step="0.05"><output id="oScale"></output></div>
+    <div class="chk"><label><input type="checkbox" id="cTaa" checked> temporal AA</label></div>
+  </div>
+  <div class="foot">
+    <kbd>drag</kbd> orbit · <kbd>right-drag</kbd> pan · <kbd>wheel</kbd> zoom · <kbd>click</kbd> water to ripple<br>
+    Tools: <kbd>B</kbd> drop · <kbd>I</kbd> ink · <kbd>T</kbd> stir · <kbd>A</kbd> sand · <kbd>L</kbd> lamp · <kbd>J</kbd> laser · <kbd>Esc</kbd> orbit. With a tool, right-drag orbits.<br>
+    <kbd>K</kbd> laser on/off · 
+    <kbd>P</kbd> pour sand · <kbd>V</kbd> sweep · <kbd>Z</kbd> clear sand<br>
+    <kbd>N</kbd> drop ink · <kbd>X</kbd> clear ink · <kbd>M</kbd> sun/lamp · <kbd>1</kbd>–<kbd>6</kbd> views · <kbd>D</kbd> drop · <kbd>S</kbd> splash · <kbd>space</kbd> pause · <kbd>H</kbd> hide panel
+  </div>
+</div>
+<button id="toggle">Controls</button>
+<div id="caption"></div>
+<div id="load"><h1>CAUSTIC<b>//</b>VOLUME</h1><div class="bar"><i id="loadBar"></i></div><p id="loadMsg">Compiling shaders…</p></div>

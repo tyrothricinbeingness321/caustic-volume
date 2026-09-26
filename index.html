@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CAUSTIC//VOLUME</title>
+<meta name="description" content="Real-time water caustics in the browser: a lightweight version that runs almost anywhere, and a heavy sandbox for strong GPUs.">
+<style>
+:root{--bg:#0e1012;--ink:#d9e4e8;--dim:#7f8e95;--cyan:#5fe3ff;--gold:#e5b95a;--cream:#efe6d2;--line:rgba(95,227,255,.16)}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+main{max-width:1040px;margin:0 auto;padding:48px 20px}
+h1{margin:0;font:400 clamp(28px,6vw,44px)/1.1 Georgia,serif;letter-spacing:.06em;color:var(--cream)}
+h1 b,h2 b{color:var(--cyan);font-weight:400}
+.lead{max-width:620px;color:var(--dim);margin:12px 0 32px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+a.card{display:block;color:inherit;text-decoration:none;border:1px solid var(--line);background:#121619}
+a.card:hover,a.card:focus-visible{border-color:var(--cyan);outline:none}
+a.card img{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover}
+.card div{padding:14px 16px 16px}
+h2{margin:0 0 6px;font:400 20px Georgia,serif;letter-spacing:.05em;color:var(--cream)}
+.card p{margin:0;color:var(--dim)}
+.card .req{margin-top:10px;color:var(--gold);font-size:12px}
+footer{margin-top:32px;color:var(--dim);font-size:12px}
+footer a{color:var(--cyan)}
+</style>
+</head>
+<body>
+<main>
+  <h1>CAUSTIC<b>//</b>VOLUME</h1>
+  <p class="lead">Real-time water caustics in the browser: sunlight bent by a moving surface and focused into the bright lines you see on the bottom of a pool. Each version is one HTML file built on three.js, free and open source.</p>
+  <div class="cards">
+    <a class="card" href="lite/index.html">
+      <img src="docs/lite.jpg" alt="A glass tank of water with caustics on the floor" width="1280" height="720">
+      <div><h2>CAUSTIC<b>//</b>LITE</h2><p>A random sea, a rubber duck making ripples, sun or lamp, and the caustics, in about 990 readable lines. Runs on old laptops and phones.</p>
+      <p class="req">three.js on WebGL 2, or the CPU when there is none</p></div>
+    </a>
+    <a class="card" href="sandbox/index.html">
+      <img src="docs/sandbox.jpg" alt="The sandbox: toy boats, fish and sunken treasure in the tank" width="1280" height="720">
+      <div><h2>CAUSTIC<b>//</b>VOLUME sandbox</h2><p>Boats, creatures, ink, falling sand, lamps and a laser. Built to push a strong GPU.</p>
+      <p class="req" id="req2">three.js on WebGL 2 and a capable GPU</p></div>
+    </a>
+  </div>
+  <footer>MIT licensed: free to use, change and share. <a href="https://github.com/ScottieFox/caustic-volume">Source on GitHub</a></footer>
+</main>
+<script>
+// say so up front if this browser can't run the sandbox
+if (!document.createElement('canvas').getContext('webgl2')) document.getElementById('req2').textContent = 'Needs WebGL 2, which this browser doesn’t have. Try Lite.';
+</script>
+</body>
+</html>
